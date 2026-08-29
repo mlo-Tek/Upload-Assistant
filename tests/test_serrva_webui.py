@@ -35,3 +35,26 @@ def test_image_host_dropdown_fallback_includes_supported_hosts() -> None:
     assert "Available image hosts:" in script
     for host in ("ptscreens", "imgbb", "imgbox"):
         assert f'"{host}"' in script
+
+
+def test_optimized_browse_search_loads_before_app() -> None:
+    index = (ROOT / "web_ui" / "templates" / "index.html").read_text(encoding="utf-8")
+
+    shared_index = index.index("js/shared_utils.js")
+    search_fix_index = index.index("js/serrva_browse_search.js")
+    app_index = index.index("js/app.js")
+
+    assert shared_index < search_fix_index < app_index
+
+
+def test_optimized_browse_search_is_bounded_and_breadth_first() -> None:
+    script = (ROOT / "web_ui" / "static" / "js" / "serrva_browse_search.js").read_text(encoding="utf-8")
+
+    assert 'parsed.pathname === "/api/browse_search"' in script
+    assert 'originalApiFetch("/api/browse_roots")' in script
+    assert "/api/browse?path=" in script
+    assert "MAX_DEPTH = 3" in script
+    assert "MAX_REQUESTS = 12" in script
+    assert "BATCH_SIZE = 4" in script
+    assert "depthOrder" in script
+    assert "queue.push(...next)" in script
