@@ -14,6 +14,10 @@ def test_release_group_from_known_prefix_source_title() -> None:
     assert _release_group_from_source_title("vector-hueterlicht-1080p") == "VECTOR"
 
 
+def test_release_group_does_not_treat_resolution_as_group() -> None:
+    assert _release_group_from_source_title("Movie.2026-1080p") is None
+
+
 def test_history_prefers_import_record_for_current_file() -> None:
     records = [
         {
