@@ -1,5 +1,4 @@
 # Upload Assistant © 2025 Audionut & wastaken7 — Licensed under UAPL v1.0
-from pathlib import Path
 from typing import Any
 
 import cli_ui
@@ -7,7 +6,6 @@ import langcodes
 
 from src.console import logger
 from src.meta import Meta
-from src.radarr import RadarrManager
 from src.trackers.common import Common
 from src.trackers.UNIT3D import UNIT3D
 
@@ -34,7 +32,6 @@ class Luminarr(UNIT3D):
         super().__init__(config, tracker_name="LUMINARR")
         self.config = config
         self.common = Common(config)
-        self.radarr_manager = RadarrManager(config)
 
     @staticmethod
     def _language_code(value: str | None) -> str:
@@ -97,65 +94,6 @@ class Luminarr(UNIT3D):
 
         return ""
 
-    @staticmethod
-    def _vector_prefix_group(meta: Meta) -> str:
-        """Recognize VECTOR's old lowercase prefix naming convention."""
-        candidates: list[Any] = [meta.video, meta.basename_no_ext]
-        candidates.extend(meta.filelist or [])
-
-        for candidate in candidates:
-            if not candidate:
-                continue
-            basename = Path(str(candidate)).name
-            if basename.casefold().startswith("vector-"):
-                return "VECTOR"
-
-        return ""
-
-    def _radarr_is_configured(self) -> bool:
-        default_config = self.config.get("DEFAULT", {})
-        return any(
-            str(value or "").strip()
-            for key, value in default_config.items()
-            if str(key).startswith("radarr_api_key")
-        )
-
-    async def _luminarr_release_group(self, meta: Meta) -> str:
-        """Resolve a missing release group without requiring ``-g``.
-
-        Normal UA filename parsing remains authoritative. VECTOR's legacy
-        ``vector-...`` prefix is recognized locally. For movie filenames that
-        intentionally contain no group marker, Radarr's ``movieFile.releaseGroup``
-        is used as provenance when Radarr is configured.
-        """
-        if meta.no_tag:
-            return ""
-
-        if meta.tag:
-            return str(meta.tag).strip().lstrip("-")
-
-        prefix_group = self._vector_prefix_group(meta)
-        if prefix_group:
-            logger.info(f"{self.tracker}: detected release group '{prefix_group}' from original filename prefix")
-            return prefix_group
-
-        if meta.category != "MOVIE" or not meta.tmdb_id or not self._radarr_is_configured():
-            return ""
-
-        try:
-            tmdb_id = int(meta.tmdb_id)
-        except (TypeError, ValueError):
-            return ""
-
-        radarr_data = await self.radarr_manager.get_radarr_data(tmdb_id=tmdb_id)
-        if not radarr_data:
-            return ""
-
-        release_group = str(radarr_data.get("release_group") or "").strip().lstrip("-")
-        if release_group:
-            logger.info(f"{self.tracker}: resolved release group '{release_group}' from Radarr")
-        return release_group
-
     async def get_name(self, meta: Meta) -> dict[str, str]:
         name = meta.name
         dub_label = self._luminarr_dub_label(meta)
@@ -163,11 +101,6 @@ class Luminarr(UNIT3D):
         if dub_label and "Dual-Audio" in name:
             name = name.replace("Dual-Audio", dub_label, 1)
             logger.info(f"{self.tracker}: adjusted multi-audio naming to '{dub_label}'")
-
-        release_group = await self._luminarr_release_group(meta)
-        if release_group and not name.casefold().endswith(f"-{release_group}".casefold()):
-            name = f"{name.rstrip()}-{release_group}"
-            logger.info(f"{self.tracker}: added automatically resolved release group '-{release_group}'")
 
         return {"name": name}
 
