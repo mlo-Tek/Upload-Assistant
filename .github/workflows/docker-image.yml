@@ -1,6 +1,9 @@
 name: Create and publish Docker images
 
 on:
+  push:
+    branches:
+      - development
   release:
     types:
       - published
@@ -37,9 +40,9 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ steps.image-name.outputs.image_name }}
           tags: |
-            type=raw,value=latest,enable=${{ github.event_name == 'release' || (github.event_name == 'workflow_dispatch' && inputs.use_latest_tag == true) }},priority=1000
+            type=raw,value=latest,enable=${{ github.event_name == 'release' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.use_latest_tag == true) }},priority=1000
             type=ref,event=tag
-            type=ref,event=branch,enable=${{ !inputs.use_latest_tag }}
+            type=ref,event=branch,enable=${{ github.event_name == 'workflow_dispatch' && inputs.use_latest_tag != true }}
 
   build:
     needs: prepare
@@ -150,6 +153,8 @@ jobs:
           echo "📝 Event: ${{ github.event_name }}"
           if [ "${{ github.event_name }}" == "release" ]; then
             echo "📝 Triggered by release: ${{ github.event.release.tag_name }}"
+          elif [ "${{ github.event_name }}" == "push" ]; then
+            echo "📝 Triggered by push to development: ${{ github.sha }}"
           else
             echo "📝 Triggered by manual workflow dispatch on branch: ${{ github.ref_name }}"
           fi
