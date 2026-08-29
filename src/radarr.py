@@ -33,19 +33,22 @@ def _release_group_from_source_title(source_title: object) -> str | None:
     if suffix in _MEDIA_EXTENSIONS:
         basename = basename[: -len(suffix)]
 
-    # Standard scene/P2P release naming: ...-GROUP
-    match = re.search(r"-([A-Za-z0-9][A-Za-z0-9._]{0,31})$", basename)
-    if match:
-        group = match.group(1).strip()
-        if group:
-            return _KNOWN_RELEASE_GROUPS.get(group.casefold(), group)
-
-    # A few historical releases use a group prefix instead of a suffix.
+    # Known historical prefix naming must be checked before the generic suffix
+    # parser, otherwise names such as vector-hueterlicht-1080p are incorrectly
+    # interpreted as release group "1080p".
     prefix, separator, _rest = basename.partition("-")
     if separator:
         known = _KNOWN_RELEASE_GROUPS.get(prefix.casefold())
         if known:
             return known
+
+    # Standard scene/P2P release naming: ...-GROUP. Do not accept obvious
+    # resolution tokens as groups when a source title ends with e.g. -1080p.
+    match = re.search(r"-([A-Za-z0-9][A-Za-z0-9._]{0,31})$", basename)
+    if match:
+        group = match.group(1).strip()
+        if group and not re.fullmatch(r"\d{3,4}[pi]", group, re.IGNORECASE):
+            return _KNOWN_RELEASE_GROUPS.get(group.casefold(), group)
 
     return None
 
