@@ -53,8 +53,17 @@ def _release_group_from_source_title(source_title: object) -> str | None:
     return None
 
 
-def _history_release_group(records: object, current_path: str | None = None) -> str | None:
-    """Resolve the group from the import record matching the current movie file."""
+def _history_release_group(
+    records: object,
+    current_path: str | None = None,
+    *,
+    allow_latest_import_fallback: bool = True,
+) -> str | None:
+    """Resolve a release group from Radarr import history.
+
+    Exact imported-path matches are always preferred. A latest-import fallback is
+    only safe when the caller knows the response is already scoped to one movie.
+    """
     if isinstance(records, Mapping):
         raw_records = records.get("records", [])
     else:
@@ -81,9 +90,17 @@ def _history_release_group(records: object, current_path: str | None = None) -> 
             if imported_path and imported_path == current_norm:
                 exact_matches.append(record)
 
-    # Prefer provenance tied to the exact file; otherwise the newest import
-    # record is the best available fallback for an upgraded movie.
-    for record in [*exact_matches, *import_records]:
+    for record in exact_matches:
+        group = _release_group_from_source_title(record.get("sourceTitle"))
+        if group:
+            return group
+
+    if not allow_latest_import_fallback:
+        return None
+
+    # Only callers with a movie-scoped response may use the newest import as a
+    # fallback, e.g. after Radarr renamed the file since the original import.
+    for record in import_records:
         group = _release_group_from_source_title(record.get("sourceTitle"))
         if group:
             return group
@@ -104,13 +121,20 @@ class RadarrManager:
         current_path: str | None,
     ) -> str | None:
         headers = {"X-Api-Key": api_key, "Content-Type": "application/json"}
-        urls = (
-            f"{base_url}/api/v3/history/movie?movieId={movie_id}",
-            f"{base_url}/api/v3/history?movieId={movie_id}&page=1&pageSize=100&sortKey=date&sortDirection=descending&includeMovie=false",
+        endpoints = (
+            # This endpoint is genuinely movie-scoped, so a latest-import
+            # fallback remains safe when the file was renamed after import.
+            (f"{base_url}/api/v3/history/movie?movieId={movie_id}", True),
+            # Some Radarr versions ignore movieId on the generic history route.
+            # Therefore this fallback may only use an exact importedPath match.
+            (
+                f"{base_url}/api/v3/history?movieId={movie_id}&page=1&pageSize=100&sortKey=date&sortDirection=descending&includeMovie=false",
+                False,
+            ),
         )
 
         async with httpx.AsyncClient() as client:
-            for url in urls:
+            for url, allow_latest_import_fallback in endpoints:
                 try:
                     response = await client.get(url, headers=headers, timeout=10.0)
                 except (httpx.TimeoutException, httpx.RequestError):
@@ -124,7 +148,11 @@ class RadarrManager:
                 except Exception:
                     continue
 
-                release_group = _history_release_group(history, current_path)
+                release_group = _history_release_group(
+                    history,
+                    current_path,
+                    allow_latest_import_fallback=allow_latest_import_fallback,
+                )
                 if release_group:
                     logger.info(f"[green]Resolved release group '-{release_group}' from Radarr history[/green]")
                     return release_group

@@ -41,7 +41,7 @@ def test_history_prefers_import_record_for_current_file() -> None:
     )
 
 
-def test_history_accepts_paged_response_and_latest_import_fallback() -> None:
+def test_movie_scoped_history_accepts_latest_import_fallback() -> None:
     history = {
         "records": [
             {
@@ -52,9 +52,71 @@ def test_history_accepts_paged_response_and_latest_import_fallback() -> None:
             {
                 "eventType": "downloadFolderImported",
                 "sourceTitle": "Movie.2026.1080p.WEB-DL-FLUX",
-                "data": {},
+                "data": {"importedPath": "/data/media/movies/Movie (2026)/old-name.mkv"},
             },
         ]
     }
 
-    assert _history_release_group(history) == "FLUX"
+    assert (
+        _history_release_group(
+            history,
+            "/data/media/movies/Movie (2026)/new-name.mkv",
+        )
+        == "FLUX"
+    )
+
+
+def test_generic_history_rejects_unrelated_latest_import() -> None:
+    history = {
+        "records": [
+            {
+                "eventType": "downloadFolderImported",
+                "sourceTitle": "Jurassic.Park.3.2001.2160p.UHD.BluRay-VECTOR",
+                "data": {
+                    "importedPath": "/data/media/movies/Jurassic Park III (2001)/Jurassic.Park.3.2001.mkv"
+                },
+            },
+            {
+                "eventType": "downloadFolderImported",
+                "sourceTitle": "Jack.Reacher.2012.2160p.UHD.BluRay-VECTOR",
+                "data": {"importedPath": "/data/media/movies/Jack Reacher (2012)/Jack.Reacher.2012.mkv"},
+            },
+        ]
+    }
+
+    assert (
+        _history_release_group(
+            history,
+            "/data/media/movies/Waterworld (1995)/Waterworld.1995.mkv",
+            allow_latest_import_fallback=False,
+        )
+        is None
+    )
+
+
+def test_generic_history_still_accepts_exact_path_match() -> None:
+    history = {
+        "records": [
+            {
+                "eventType": "downloadFolderImported",
+                "sourceTitle": "Jurassic.Park.3.2001.2160p.UHD.BluRay-VECTOR",
+                "data": {
+                    "importedPath": "/data/media/movies/Jurassic Park III (2001)/Jurassic.Park.3.2001.mkv"
+                },
+            },
+            {
+                "eventType": "downloadFolderImported",
+                "sourceTitle": "Waterworld.1995.German.DTSX.DL.2160p.UHD.UK.BluRay.DV.HDR.x265-VECTOR",
+                "data": {"importedPath": "/data/media/movies/Waterworld (1995)/Waterworld.1995.mkv"},
+            },
+        ]
+    }
+
+    assert (
+        _history_release_group(
+            history,
+            "/data/media/movies/Waterworld (1995)/Waterworld.1995.mkv",
+            allow_latest_import_fallback=False,
+        )
+        == "VECTOR"
+    )
