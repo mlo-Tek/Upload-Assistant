@@ -214,6 +214,16 @@ class DigitalCore:
                 raw_url = covers[0].get("raw_url")
                 if raw_url:
                     return str(raw_url)
+
+        if meta.category in ("MOVIE", "TV"):
+            images = meta.image_list
+            if isinstance(images, list):
+                for image in images:
+                    if isinstance(image, dict):
+                        raw_url = image.get("raw_url")
+                        if raw_url:
+                            return str(raw_url)
+
         return ""
 
     async def fetch_data(self, meta: Meta) -> dict[str, Any]:
@@ -228,7 +238,7 @@ class DigitalCore:
             "section": "new",
             "frileech": "1",
             "anonymousUpload": anon,
-            "p2p": "0",
+            "p2p": "0" if meta.scene_name else "1",
             "unrar": "1",
             "firstpic": await self.get_firstpic(meta),
             "language": meta.book_language,
