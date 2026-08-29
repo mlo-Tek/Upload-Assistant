@@ -1,0 +1,28 @@
+/* Serrva-specific Web UI improvements kept separate from upstream styling. */
+
+/*
+ * On desktop, keep the expanded Execution Output large enough to follow a
+ * completed upload. The upload form remains scrollable in the space above it
+ * instead of forcing the terminal down to only a few visible lines.
+ */
+@media (min-width: 768px) {
+  div.relative.flex-1.flex.flex-col.min-w-0.overflow-hidden:has(
+      button[title="Collapse output"]
+    )
+    > div:first-child {
+    flex: 1 1 auto !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+  }
+
+  div:has(> div > #rich-output:not(.hidden)):has(
+      button[title="Collapse output"]
+    ) {
+    flex: 0 0 clamp(28rem, 52vh, 44rem) !important;
+    min-height: clamp(28rem, 52vh, 44rem) !important;
+  }
+
+  #rich-output:not(.hidden) {
+    scrollbar-gutter: stable;
+  }
+}
