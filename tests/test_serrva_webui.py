@@ -58,3 +58,40 @@ def test_optimized_browse_search_is_bounded_and_breadth_first() -> None:
     assert "BATCH_SIZE = 4" in script
     assert "depthOrder" in script
     assert "queue.push(...next)" in script
+
+
+def test_recent_upload_history_loads_before_app() -> None:
+    index = (ROOT / "web_ui" / "templates" / "index.html").read_text(encoding="utf-8")
+
+    shared_index = index.index("js/shared_utils.js")
+    history_index = index.index("js/serrva_upload_history.js")
+    app_index = index.index("js/app.js")
+
+    assert shared_index < history_index < app_index
+
+
+def test_recent_upload_history_captures_execute_stream_and_is_bounded() -> None:
+    script = (ROOT / "web_ui" / "static" / "js" / "serrva_upload_history.js").read_text(encoding="utf-8")
+
+    assert 'parsed.pathname.endsWith("/api/execute")' in script
+    assert "response.clone()" in script
+    assert "indexedDB.open" in script
+    assert "MAX_RECORDS = 250" in script
+    assert "MAX_OUTPUT_CHARS = 30000" in script
+    assert 'button.setAttribute("aria-label", "Recent Uploads")' in script
+    assert 'option value="25"' in script
+    assert 'option value="250"' in script
+    assert "Group Tag" in script
+    assert "Request Data:" in script
+    assert "Dupe:" in script
+    assert "Skipped:" in script
+
+
+def test_recent_upload_history_has_responsive_modal_styles() -> None:
+    css = (ROOT / "web_ui" / "static" / "css" / "serrva.css").read_text(encoding="utf-8")
+
+    assert "#ua-upload-history-modal" in css
+    assert ".ua-history-modal" in css
+    assert ".ua-history-status-uploaded" in css
+    assert ".ua-history-status-dry_run" in css
+    assert "@media (max-width: 767px)" in css
