@@ -37,24 +37,50 @@ def test_image_host_dropdown_fallback_includes_supported_hosts() -> None:
         assert f'"{host}"' in script
 
 
-def test_optimized_browse_search_loads_before_app() -> None:
+def test_serrva_helpers_load_before_app() -> None:
     index = (ROOT / "web_ui" / "templates" / "index.html").read_text(encoding="utf-8")
 
     shared_index = index.index("js/shared_utils.js")
     search_fix_index = index.index("js/serrva_browse_search.js")
+    history_index = index.index("js/serrva_upload_history.js")
     app_index = index.index("js/app.js")
 
-    assert shared_index < search_fix_index < app_index
+    assert shared_index < search_fix_index < history_index < app_index
 
 
-def test_optimized_browse_search_is_bounded_and_breadth_first() -> None:
+def test_optimized_browse_search_is_bounded_cached_and_breadth_first() -> None:
     script = (ROOT / "web_ui" / "static" / "js" / "serrva_browse_search.js").read_text(encoding="utf-8")
 
     assert 'parsed.pathname === "/api/browse_search"' in script
     assert 'originalApiFetch("/api/browse_roots")' in script
     assert "/api/browse?path=" in script
     assert "MAX_DEPTH = 3" in script
-    assert "MAX_REQUESTS = 12" in script
-    assert "BATCH_SIZE = 4" in script
+    assert "MAX_REQUESTS = 8" in script
+    assert "BATCH_SIZE = 3" in script
+    assert "BROWSE_CACHE_TTL_MS" in script
+    assert "browseCache = new Map()" in script
+    assert "cachedBrowseRequest" in script
     assert "depthOrder" in script
     assert "queue.push(...next)" in script
+
+
+def test_recent_upload_history_observes_execute_stream_and_persists_entries() -> None:
+    script = (ROOT / "web_ui" / "static" / "js" / "serrva_upload_history.js").read_text(encoding="utf-8")
+
+    assert 'parsedUrl.pathname !== "/api/execute"' in script
+    assert "response.clone()" in script
+    assert "ua_serrva_upload_history_v1" in script
+    assert "MAX_ENTRIES = 250" in script
+    assert "Group Tag" in script
+    assert "Tracker Processing Summary" not in script  # parsing stays format-focused, not tracker-specific UI text
+    assert "extractTrackerResults" in script
+
+
+def test_recent_upload_history_has_filters_details_and_export() -> None:
+    script = (ROOT / "web_ui" / "static" / "js" / "serrva_upload_history.js").read_text(encoding="utf-8")
+
+    for label in ("Recent Uploads", "All statuses", "Dry Run", "Skipped / Dupe", "Last 250", "Export JSON"):
+        assert label in script
+    assert "Execution output excerpt" in script
+    assert "tracker_titles" in script
+    assert "output_excerpt" in script
