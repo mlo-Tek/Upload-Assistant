@@ -2,6 +2,7 @@
 from typing import Any
 
 import cli_ui
+import langcodes
 
 from src.console import logger
 from src.meta import Meta
@@ -31,6 +32,59 @@ class Luminarr(UNIT3D):
         super().__init__(config, tracker_name="LUMINARR")
         self.config = config
         self.common = Common(config)
+
+    @staticmethod
+    def _language_code(value: str | None) -> str:
+        if not value:
+            return ""
+        try:
+            return str(langcodes.find(value).language or "").lower()
+        except LookupError, ValueError:
+            return value.strip().lower().split("-")[0]
+
+    @staticmethod
+    def _language_display_name(value: str) -> str:
+        try:
+            code = langcodes.find(value).language
+            if code:
+                name = langcodes.Language.get(code).language_name()
+                if name:
+                    return str(name)
+        except LookupError, ValueError:
+            pass
+        return value.strip().title()
+
+    def _luminarr_dub_label(self, meta: Meta) -> str:
+        """Return Luminarr's tracker-specific Dub title element for non-disc releases.
+
+        Luminarr reserves ``Dual-Audio`` for non-English original content that
+        includes an English dub. For English-original content with additional
+        dubbed languages the tracker uses ``{Language} Multi`` instead.
+        """
+        if meta.is_disc:
+            return ""
+
+        original_code = self._language_code(meta.original_language)
+        if original_code != "en":
+            return ""
+
+        audio_languages = [str(language) for language in (meta.audio_languages or []) if str(language).strip()]
+        for language in audio_languages:
+            language_code = self._language_code(language)
+            if language_code and language_code not in {"en", "zxx", "xx"}:
+                return f"{self._language_display_name(language)} Multi"
+
+        return ""
+
+    async def get_name(self, meta: Meta) -> dict[str, str]:
+        name = meta.name
+        dub_label = self._luminarr_dub_label(meta)
+
+        if dub_label and "Dual-Audio" in name:
+            name = name.replace("Dual-Audio", dub_label, 1)
+            logger.info(f"{self.tracker}: adjusted multi-audio naming to '{dub_label}'")
+
+        return {"name": name}
 
     async def get_additional_data(self, meta: Meta) -> dict[str, Any]:
         return {
