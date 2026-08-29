@@ -1,5 +1,7 @@
 """Regression tests for release-group extraction."""
 
+from typing import Any
+
 import pytest
 
 import src.radarr as radarr_module
@@ -67,7 +69,7 @@ async def test_vector_prefix_is_recognized_globally():
 
 @pytest.mark.asyncio
 async def test_groupless_movie_uses_radarr_release_group(monkeypatch):
-    calls: list[int] = []
+    calls: list[Any] = []
 
     class FakeRadarrManager:
         def __init__(self, _config):
