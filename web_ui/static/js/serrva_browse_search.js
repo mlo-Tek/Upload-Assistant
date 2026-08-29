@@ -4,8 +4,8 @@
 // root with os.walk(). On large media/torrent trees this can take minutes before
 // a shallow match is reached. Replace only that Web UI request with a bounded
 // breadth-first search built from the existing /api/browse_roots and /api/browse
-// endpoints. Shallow media folders are therefore discovered first and the UI
-// remains responsive.
+// endpoints. Movie/TV libraries are prioritized so common searches are reached
+// before unrelated media roots or torrent trees.
 //
 // Keep successful browse responses briefly cached as well. The Web UI has a
 // conservative global request limiter and the bounded search otherwise burns
@@ -100,10 +100,14 @@
 
   const pathPriority = (path) => {
     const normalized = String(path || "").toLowerCase();
-    if (normalized.includes("/media/")) return 0;
-    if (normalized.endsWith("/media")) return 0;
-    if (normalized.includes("/movies")) return 1;
-    if (normalized.includes("/tv")) return 1;
+    // Search the actual movie/TV libraries first. The previous ordering treated
+    // every /media/* folder equally, so a large number of unrelated library
+    // roots could consume the bounded request budget before /media/movies was
+    // ever visited.
+    if (normalized.includes("/movies")) return 0;
+    if (normalized.includes("/tv")) return 0;
+    if (normalized.includes("/media/")) return 1;
+    if (normalized.endsWith("/media")) return 1;
     if (normalized.includes("/torrents/")) return 3;
     if (normalized.endsWith("/torrents")) return 3;
     return 2;
