@@ -54,6 +54,7 @@ def test_optimized_browse_search_is_bounded_and_breadth_first() -> None:
     assert 'originalApiFetch("/api/browse_roots")' in script
     assert "/api/browse?path=" in script
     assert "MAX_DEPTH = 3" in script
-    assert "MAX_REQUESTS = 24" in script
+    assert "MAX_REQUESTS = 12" in script
     assert "BATCH_SIZE = 4" in script
+    assert "depthOrder" in script
     assert "queue.push(...next)" in script
