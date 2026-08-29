@@ -35,23 +35,41 @@ class Luminarr(UNIT3D):
 
     @staticmethod
     def _language_code(value: str | None) -> str:
+        """Normalize either a language tag/code or a natural-language name."""
         if not value:
             return ""
-        try:
-            return str(langcodes.find(value).language or "").lower()
-        except LookupError, ValueError:
-            return value.strip().lower().split("-")[0]
 
-    @staticmethod
-    def _language_display_name(value: str) -> str:
+        normalized = value.strip().replace("_", "-")
+
+        # Metadata commonly contains BCP-47 / ISO codes such as ``en`` or
+        # ``de-DE``. Parse those as tags first; langcodes.find() is intended
+        # for natural-language names and must not be our first choice here.
         try:
-            code = langcodes.find(value).language
-            if code:
+            language = langcodes.Language.get(normalized)
+            if language.is_valid() and language.language:
+                return str(language.language).lower()
+        except Exception:
+            pass
+
+        try:
+            language = langcodes.find(normalized)
+            if language.language:
+                return str(language.language).lower()
+        except Exception:
+            pass
+
+        return normalized.lower().split("-")[0]
+
+    @classmethod
+    def _language_display_name(cls, value: str) -> str:
+        code = cls._language_code(value)
+        if code:
+            try:
                 name = langcodes.Language.get(code).language_name()
                 if name:
                     return str(name)
-        except LookupError, ValueError:
-            pass
+            except Exception:
+                pass
         return value.strip().title()
 
     def _luminarr_dub_label(self, meta: Meta) -> str:
