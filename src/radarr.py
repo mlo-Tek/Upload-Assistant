@@ -1,5 +1,8 @@
 # Upload Assistant © 2025 Audionut & wastaken7 — Licensed under UAPL v1.0
+import os
+import re
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any, cast
 
 import httpx
@@ -8,11 +11,122 @@ from src.console import logger
 
 MovieInfo = dict[str, Any]
 
+_KNOWN_RELEASE_GROUPS = {"vector": "VECTOR"}
+_MEDIA_EXTENSIONS = {".mkv", ".mp4", ".avi", ".ts", ".m2ts", ".mov", ".wmv"}
+
+
+def _normalize_path(value: object) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    return os.path.normpath(text).casefold()
+
+
+def _release_group_from_source_title(source_title: object) -> str | None:
+    """Extract a release group from a Radarr history sourceTitle."""
+    title = str(source_title or "").strip()
+    if not title:
+        return None
+
+    basename = Path(title).name
+    suffix = Path(basename).suffix.lower()
+    if suffix in _MEDIA_EXTENSIONS:
+        basename = basename[: -len(suffix)]
+
+    # Standard scene/P2P release naming: ...-GROUP
+    match = re.search(r"-([A-Za-z0-9][A-Za-z0-9._]{0,31})$", basename)
+    if match:
+        group = match.group(1).strip()
+        if group:
+            return _KNOWN_RELEASE_GROUPS.get(group.casefold(), group)
+
+    # A few historical releases use a group prefix instead of a suffix.
+    prefix, separator, _rest = basename.partition("-")
+    if separator:
+        known = _KNOWN_RELEASE_GROUPS.get(prefix.casefold())
+        if known:
+            return known
+
+    return None
+
+
+def _history_release_group(records: object, current_path: str | None = None) -> str | None:
+    """Resolve the group from the import record matching the current movie file."""
+    if isinstance(records, Mapping):
+        raw_records = records.get("records", [])
+    else:
+        raw_records = records
+
+    if not isinstance(raw_records, list):
+        return None
+
+    current_norm = _normalize_path(current_path)
+    exact_matches: list[Mapping[str, Any]] = []
+    import_records: list[Mapping[str, Any]] = []
+
+    for raw_record in raw_records:
+        if not isinstance(raw_record, Mapping):
+            continue
+        record = cast(Mapping[str, Any], raw_record)
+        if str(record.get("eventType") or "").casefold() != "downloadfolderimported":
+            continue
+
+        import_records.append(record)
+        data = record.get("data", {})
+        if isinstance(data, Mapping) and current_norm:
+            imported_path = _normalize_path(data.get("importedPath"))
+            if imported_path and imported_path == current_norm:
+                exact_matches.append(record)
+
+    # Prefer provenance tied to the exact file; otherwise the newest import
+    # record is the best available fallback for an upgraded movie.
+    for record in [*exact_matches, *import_records]:
+        group = _release_group_from_source_title(record.get("sourceTitle"))
+        if group:
+            return group
+
+    return None
+
 
 class RadarrManager:
     def __init__(self, config: dict[str, Any]) -> None:
         self.config = config
         self.default_config = cast(dict[str, Any], config.get("DEFAULT", {}))
+
+    async def _get_history_release_group(
+        self,
+        base_url: str,
+        api_key: str,
+        movie_id: int,
+        current_path: str | None,
+    ) -> str | None:
+        headers = {"X-Api-Key": api_key, "Content-Type": "application/json"}
+        urls = (
+            f"{base_url}/api/v3/history/movie?movieId={movie_id}",
+            f"{base_url}/api/v3/history?movieId={movie_id}&page=1&pageSize=100&sortKey=date&sortDirection=descending&includeMovie=false",
+        )
+
+        async with httpx.AsyncClient() as client:
+            for url in urls:
+                try:
+                    response = await client.get(url, headers=headers, timeout=10.0)
+                except (httpx.TimeoutException, httpx.RequestError):
+                    continue
+
+                if response.status_code != 200:
+                    continue
+
+                try:
+                    history = response.json()
+                except Exception:
+                    continue
+
+                release_group = _history_release_group(history, current_path)
+                if release_group:
+                    logger.info(f"[green]Resolved release group '-{release_group}' from Radarr history[/green]")
+                    return release_group
+
+        return None
 
     async def get_radarr_data(self, tmdb_id: int | None = None, filename: str | None = None) -> MovieInfo | None:
         if not any(key.startswith("radarr_api_key") for key in self.default_config):
@@ -65,22 +179,30 @@ class RadarrManager:
                 async with httpx.AsyncClient() as client:
                     response = await client.get(url, headers=headers, timeout=10.0)
 
-                    if response.status_code == 200:
-                        data = response.json()
+                if response.status_code == 200:
+                    data = response.json()
 
-                        logger.debug(f"[blue]Radarr Response Status:[/blue] {response.status_code}")
-                        logger.debug(f"[blue]Radarr Response Data:[/blue] {data}")
+                    logger.debug(f"[blue]Radarr Response Status:[/blue] {response.status_code}")
+                    logger.debug(f"[blue]Radarr Response Data:[/blue] {data}")
 
-                        # Check if we got valid data by trying to extract movie info
-                        movie_data = await self.extract_movie_data(data, filename)
+                    # Check if we got valid data by trying to extract movie info
+                    movie_data = await self.extract_movie_data(data, filename)
 
-                        if movie_data and (movie_data.get("imdb_id") or movie_data.get("tmdb_id")):
-                            logger.info(f"[green]Found valid movie data from Radarr instance {instance_index if instance_index > 0 else 'default'}[/green]")
-                            return movie_data
-                    else:
-                        logger.info(
-                            f"[yellow]Failed to fetch from Radarr instance {instance_index if instance_index > 0 else 'default'}: {response.status_code} - {response.text}[/yellow]"
-                        )
+                    if movie_data and (movie_data.get("imdb_id") or movie_data.get("tmdb_id")):
+                        if not movie_data.get("release_group"):
+                            movie_id = movie_data.get("radarr_id")
+                            current_path = movie_data.get("movie_file_path")
+                            if isinstance(movie_id, int) and movie_id > 0:
+                                history_group = await self._get_history_release_group(base_url, api_key, movie_id, str(current_path or ""))
+                                if history_group:
+                                    movie_data["release_group"] = history_group
+
+                        logger.info(f"[green]Found valid movie data from Radarr instance {instance_index if instance_index > 0 else 'default'}[/green]")
+                        return movie_data
+                else:
+                    logger.info(
+                        f"[yellow]Failed to fetch from Radarr instance {instance_index if instance_index > 0 else 'default'}: {response.status_code} - {response.text}[/yellow]"
+                    )
 
             except httpx.TimeoutException:
                 logger.info(f"[red]Timeout when fetching from Radarr instance {instance_index if instance_index > 0 else 'default'}[/red]")
@@ -126,4 +248,6 @@ class RadarrManager:
             "year": movie.get("year", None),
             "genres": movie.get("genres", []),
             "release_group": release_group if release_group else None,
+            "radarr_id": movie.get("id") if isinstance(movie.get("id"), int) else None,
+            "movie_file_path": movie_file.get("path") if movie_file.get("path") else None,
         }
