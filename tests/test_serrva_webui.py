@@ -82,7 +82,9 @@ def test_recent_upload_history_captures_execute_stream_and_is_bounded() -> None:
     assert 'option value="25"' in script
     assert 'option value="250"' in script
     assert "Group Tag" in script
-    assert "Tracker Processing Summary" in script
+    assert "Request Data:" in script
+    assert "Dupe:" in script
+    assert "Skipped:" in script
 
 
 def test_recent_upload_history_has_responsive_modal_styles() -> None:
