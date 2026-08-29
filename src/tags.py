@@ -26,10 +26,11 @@ def _runtime_config() -> dict[str, Any]:
     try:
         config_module = import_module("data.config")
         config = getattr(config_module, "config", {})
-        return cast(dict[str, Any], config) if isinstance(config, dict) else {}
+        if isinstance(config, dict):
+            return cast(dict[str, Any], config)
     except Exception as e:
         logger.debug(f"Unable to load runtime config for release-group fallback: {e}")
-        return {}
+    return {}
 
 
 def _known_prefix_release_group(basename: str) -> str | None:
@@ -62,7 +63,8 @@ async def _arr_release_group(meta: Meta) -> str | None:
         return None
 
     config = _runtime_config()
-    default_config = cast(dict[str, Any], config.get("DEFAULT", {}))
+    raw_default_config = config.get("DEFAULT", {})
+    default_config = cast(dict[str, Any], raw_default_config) if isinstance(raw_default_config, dict) else {}
 
     try:
         data: dict[str, Any] | None = None
