@@ -14,16 +14,117 @@ from src.meta import Meta
 guessit_module = import_module("guessit")
 GuessitFn = Callable[[str, dict[str, Any] | None], dict[str, Any]]
 _TECHNICAL_HYPHEN_PREFIXES = {"blu", "dts", "web"}
+_KNOWN_RELEASE_GROUP_PREFIXES = {"vector": "VECTOR"}
 
 
 def guessit_fn(value: str, options: dict[str, Any] | None = None) -> dict[str, Any]:
     return cast(dict[str, Any], guessit_module.guessit(value, options))
 
 
+def _runtime_config() -> dict[str, Any]:
+    """Return the active user config without making it a module-level dependency."""
+    try:
+        config_module = import_module("data.config")
+        config = getattr(config_module, "config", {})
+        return cast(dict[str, Any], config) if isinstance(config, dict) else {}
+    except Exception as e:
+        logger.debug(f"Unable to load runtime config for release-group fallback: {e}")
+        return {}
+
+
+def _known_prefix_release_group(basename: str) -> str | None:
+    """Handle known groups that historically used a group-name prefix."""
+    prefix, separator, _rest = basename.partition("-")
+    if not separator:
+        return None
+    return _KNOWN_RELEASE_GROUP_PREFIXES.get(prefix.casefold())
+
+
+async def _arr_release_group(meta: Meta) -> str | None:
+    """Use Sonarr/Radarr provenance only when filename parsing has no group.
+
+    This is deliberately tracker-independent: ``meta.tag`` is populated before
+    any tracker adapter creates its final upload name. Normal filename parsing
+    and an explicit ``-g`` therefore remain authoritative.
+    """
+    if meta.no_tag:
+        return None
+
+    category = str(meta.category or "").upper()
+    if category not in {"MOVIE", "TV"}:
+        return None
+
+    # Avoid loading runtime config during normal parser-only calls/tests when
+    # there is not enough *arr identity to perform a useful lookup anyway.
+    if category == "MOVIE" and not meta.tmdb_id:
+        return None
+    if category == "TV" and not ((meta.path and meta.filename) or meta.tvdb_id):
+        return None
+
+    config = _runtime_config()
+    default_config = cast(dict[str, Any], config.get("DEFAULT", {}))
+
+    try:
+        data: dict[str, Any] | None = None
+        source = ""
+
+        if category == "MOVIE":
+            if not default_config.get("use_radarr", False):
+                return None
+
+            from src.radarr import RadarrManager
+
+            try:
+                tmdb_id = int(meta.tmdb_id or 0)
+            except (TypeError, ValueError):
+                return None
+            if tmdb_id <= 0:
+                return None
+
+            data = await RadarrManager(config).get_radarr_data(tmdb_id=tmdb_id)
+            source = "Radarr"
+
+        elif category == "TV":
+            if not default_config.get("use_sonarr", False):
+                return None
+
+            from src.sonarr import SonarrManager
+
+            manager = SonarrManager(config)
+            if meta.path and meta.filename:
+                data = await manager.get_sonarr_data(filename=str(meta.path), title=str(meta.filename))
+
+            if (not data or not data.get("release_group")) and meta.tvdb_id:
+                try:
+                    tvdb_id = int(meta.tvdb_id)
+                except (TypeError, ValueError):
+                    tvdb_id = 0
+                if tvdb_id > 0:
+                    data = await manager.get_sonarr_data(tvdb_id=tvdb_id)
+            source = "Sonarr"
+
+        if not data:
+            return None
+
+        release_group = str(data.get("release_group") or "").strip().lstrip("-")
+        if release_group:
+            logger.info(f"Resolved release group '-{release_group}' from {source}")
+            return release_group
+    except Exception as e:
+        # Group detection is helpful metadata, never a reason to abort a run.
+        logger.debug(f"Unable to resolve release group from *arr: {e}")
+
+    return None
+
+
 async def get_tag(video: str, meta: Meta, season_pack_check: bool = False) -> str:
     # Using regex from cross-seed (https://github.com/cross-seed/cross-seed/tree/master?tab=Apache-2.0-1-ov-file)
+    if meta.no_tag:
+        return ""
+
     release_group = None
     matched_anime = False
+    basename_for_prefix = ""
 
     # Try specialized regex patterns first
     if meta.anime:
@@ -75,6 +176,7 @@ async def get_tag(video: str, meta: Meta, season_pack_check: bool = False) -> st
         name, ext = Path(basename_stripped).stem, Path(basename_stripped).suffix
         if ext.lower() in known_extensions:
             basename_stripped = name
+        basename_for_prefix = basename_stripped
 
         non_anime_match = re.search(
             r"(?<=-)((?!\s*(?:WEB-DL|Blu-ray|H-264|H-265))(?:\W|\b)(?!(?:\d{3,4}[ip]))(?!\d+\b)(?:\W|\b)([\w .]+?))(?:\[.+\])?(?:\))?(?:\s\[.+\])?$", basename_stripped
@@ -119,6 +221,14 @@ async def get_tag(video: str, meta: Meta, season_pack_check: bool = False) -> st
                     release_group = None
             logger.debug(f"Non-anime regex match: {release_group}")
 
+    # VECTOR is known to have historical releases that put the group at the
+    # beginning (e.g. vector-hueterlicht-1080p) instead of using -VECTOR.
+    # Keep this in the global parser so every tracker sees the same group.
+    if not release_group and basename_for_prefix:
+        release_group = _known_prefix_release_group(basename_for_prefix)
+        if release_group:
+            logger.debug(f"Known prefix release-group match: {release_group}")
+
     # If regex patterns didn't work, fall back to guessit
     if not release_group and meta.is_disc:
         try:
@@ -133,6 +243,12 @@ async def get_tag(video: str, meta: Meta, season_pack_check: bool = False) -> st
     # BDMV validation
     if meta.is_disc == "BDMV" and release_group and f"{release_group}" not in video:
         release_group = None
+
+    # A filename can legitimately contain no group at all (VECTOR has several
+    # such releases). In that case use the release-group provenance already
+    # maintained by Sonarr/Radarr. This applies before tracker-specific naming.
+    if not release_group:
+        release_group = await _arr_release_group(meta)
 
     # Format the tag
     tag = f"-{release_group}" if release_group else ""
