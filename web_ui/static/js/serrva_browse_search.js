@@ -12,7 +12,7 @@
 
   const MAX_RESULTS = 100;
   const MAX_DEPTH = 3;
-  const MAX_REQUESTS = 24;
+  const MAX_REQUESTS = 12;
   const BATCH_SIZE = 4;
   let searchGeneration = 0;
 
@@ -35,6 +35,8 @@
 
   const sortQueue = (queue) =>
     queue.sort((a, b) => {
+      const depthOrder = Number(a.depth || 0) - Number(b.depth || 0);
+      if (depthOrder !== 0) return depthOrder;
       const priority = pathPriority(a.path) - pathPriority(b.path);
       if (priority !== 0) return priority;
       return String(a.path || "").localeCompare(String(b.path || ""));
