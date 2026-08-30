@@ -1,4 +1,4 @@
-"""Regression tests for DarkPeers rule 4.12 original-release naming."""
+"""Regression tests for DarkPeers rule 4.12 provenance and naming-guide output."""
 
 import asyncio
 from unittest.mock import AsyncMock
@@ -9,6 +9,7 @@ from src.trackers.UNIT3D.darkpeers import DarkPeers
 
 ORIGINAL = "Waterworld.1995.German.DTSX.DL.2160p.UHD.UK.BluRay.DV.HDR.x265-VECTOR"
 GENERATED = "Waterworld 1995 2160p UHD BluRay Dual-Audio DTS:X 7.1 DV HDR x265-VECTOR"
+DP_FORMATTED = "Waterworld 1995 2160p UHD BluRay German MULTi DTS:X 7.1 DV HDR x265-VECTOR"
 CURRENT_PATH = "/data/media/movies/Waterworld (1995) [tmdb-9804]/Waterworld.1995.mkv"
 
 
@@ -26,7 +27,7 @@ def _adapter() -> DarkPeers:
     )
 
 
-def test_darkpeers_movie_uses_exact_original_release_name_without_retagging() -> None:
+def test_darkpeers_movie_reformats_original_release_to_tracker_naming_guide() -> None:
     adapter = _adapter()
     adapter._resolve_original_movie_name = AsyncMock(return_value=ORIGINAL)
     meta = Meta(
@@ -38,7 +39,58 @@ def test_darkpeers_movie_uses_exact_original_release_name_without_retagging() ->
         audio_languages=["German", "English"],
     )
 
-    assert asyncio.run(adapter.get_name(meta))["name"] == ORIGINAL
+    assert asyncio.run(adapter.get_name(meta))["name"] == DP_FORMATTED
+
+
+def test_darkpeers_preserves_original_release_group_while_reformatting() -> None:
+    adapter = _adapter()
+    adapter._resolve_original_movie_name = AsyncMock(return_value=ORIGINAL)
+    meta = Meta(
+        category="MOVIE",
+        tmdb_id=9804,
+        name="Waterworld 1995 2160p UHD BluRay Dual-Audio DTS:X 7.1 DV HDR x265-WRONG",
+        language_checked=True,
+        original_language="English",
+        audio_languages=["English", "German"],
+    )
+
+    assert asyncio.run(adapter.get_name(meta))["name"].endswith("-VECTOR")
+
+
+def test_darkpeers_english_original_plus_one_language_uses_language_multi() -> None:
+    adapter = _adapter()
+    meta = Meta(
+        category="MOVIE",
+        language_checked=True,
+        original_language="English",
+        audio_languages=["English", "German"],
+    )
+
+    assert asyncio.run(adapter.get_audio(meta)) == "German MULTi"
+
+
+def test_darkpeers_english_original_plus_two_languages_uses_multi() -> None:
+    adapter = _adapter()
+    meta = Meta(
+        category="MOVIE",
+        language_checked=True,
+        original_language="English",
+        audio_languages=["English", "German", "French"],
+    )
+
+    assert asyncio.run(adapter.get_audio(meta)) == "MULTi"
+
+
+def test_darkpeers_non_english_original_plus_english_uses_dual_audio() -> None:
+    adapter = _adapter()
+    meta = Meta(
+        category="MOVIE",
+        language_checked=True,
+        original_language="Japanese",
+        audio_languages=["Japanese", "English"],
+    )
+
+    assert asyncio.run(adapter.get_audio(meta)) == "Dual-Audio"
 
 
 def test_darkpeers_blocks_radarr_movie_when_original_name_cannot_be_recovered() -> None:
