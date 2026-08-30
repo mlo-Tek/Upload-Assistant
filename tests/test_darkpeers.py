@@ -104,10 +104,10 @@ def test_darkpeers_replaces_generic_dual_audio_with_rule_matrix_label():
     assert _name(meta) == "Anime 2026 1080p WEB-DL French MULTi-TEAM"
 
 
-def test_darkpeers_preserves_detected_original_scene_name():
+def test_darkpeers_reformats_detected_scene_name_but_preserves_group():
     meta = Meta(category="MOVIE", name="Generated Name", scene=True, scene_name="Original.Release.2026-GRP", language_checked=True)
 
-    assert _name(meta) == "Original.Release.2026-GRP"
+    assert _name(meta) == "Generated Name-GRP"
 
 
 def test_darkpeers_tv_name_omits_year_without_an_exact_title_match():

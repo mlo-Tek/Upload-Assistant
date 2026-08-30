@@ -1,4 +1,5 @@
 # Upload Assistant © 2025 Audionut & wastaken7 — Licensed under UAPL v1.0
+import re
 from typing import Any
 
 import cli_ui
@@ -40,10 +41,6 @@ class Luminarr(UNIT3D):
             return ""
 
         normalized = value.strip().replace("_", "-")
-
-        # Metadata commonly contains BCP-47 / ISO codes such as ``en`` or
-        # ``de-DE``. Parse those as tags first; langcodes.find() is intended
-        # for natural-language names and must not be our first choice here.
         try:
             language = langcodes.Language.get(normalized)
             if language.is_valid() and language.language:
@@ -72,37 +69,90 @@ class Luminarr(UNIT3D):
                 pass
         return value.strip().title()
 
-    def _luminarr_dub_label(self, meta: Meta) -> str:
-        """Return Luminarr's tracker-specific Dub title element for non-disc releases.
+    @classmethod
+    def _audio_languages(cls, meta: Meta) -> list[tuple[str, str]]:
+        """Return unique audio languages as ``(code, display-name)`` pairs."""
+        result: list[tuple[str, str]] = []
+        seen: set[str] = set()
+        values = meta.audio_languages if isinstance(meta.audio_languages, list) else [meta.audio_languages] if meta.audio_languages else []
+        for raw in values:
+            text = str(raw or "").strip()
+            code = cls._language_code(text)
+            if not code or code in {"zxx", "xx", "und"} or code in seen:
+                continue
+            seen.add(code)
+            result.append((code, cls._language_display_name(text)))
+        return result
 
-        Luminarr reserves ``Dual-Audio`` for non-English original content that
-        includes an English dub. For English-original content with additional
-        dubbed languages the tracker uses ``{Language} Multi`` instead.
+    def _luminarr_dub_label(self, meta: Meta) -> str:
+        """Return Luminarr's tracker-specific Dub title element.
+
+        Luminarr reserves ``Dual-Audio`` for a non-English original that carries
+        both original audio and English. English-original content with exactly
+        one additional language uses ``{Language} Multi``. With multiple extra
+        languages, use ``Multi`` rather than inventing one language label.
         """
         if meta.is_disc:
             return ""
 
-        original_code = self._language_code(meta.original_language)
-        if original_code != "en":
+        original = self._language_code(meta.original_language)
+        tracks = self._audio_languages(meta)
+        codes = {code for code, _ in tracks}
+        if not codes or len(codes) == 1 and original in codes:
             return ""
 
-        audio_languages = [str(language) for language in (meta.audio_languages or []) if str(language).strip()]
-        for language in audio_languages:
-            language_code = self._language_code(language)
-            if language_code and language_code not in {"en", "zxx", "xx"}:
-                return f"{self._language_display_name(language)} Multi"
+        if original == "en":
+            extras = [(code, name) for code, name in tracks if code != "en"]
+            if len(extras) == 1:
+                return f"{extras[0][1]} Multi"
+            if len(extras) >= 2:
+                return "Multi"
+            return ""
+
+        if original:
+            if codes == {"en"}:
+                return "Dubbed"
+            if original in codes and "en" in codes:
+                return "Dual-Audio" if len(codes) == 2 else "Multi"
+            if original in codes and len(codes) == 2:
+                other = next(((code, name) for code, name in tracks if code != original), None)
+                return f"{other[1]} Multi" if other else ""
+            if len(codes) >= 3:
+                return "Multi"
 
         return ""
 
+    @staticmethod
+    def _replace_dub_token(name: str, label: str) -> str:
+        """Replace UA's generic language element without touching codec/source tokens."""
+        clean = " ".join(str(name or "").split())
+        if not label:
+            return clean
+        pattern = r"\b(?:Dual-Audio|Dubbed|MULTi|Multi|[A-Za-z][A-Za-z -]*?\s+(?:MULTi|Multi|Dubbed))\b"
+        if re.search(pattern, clean):
+            return re.sub(pattern, label, clean, count=1)
+        return clean
+
+    @classmethod
+    def _insert_dub_label(cls, name: str, meta: Meta, label: str) -> str:
+        clean = cls._replace_dub_token(name, label)
+        if not label or label in clean:
+            return clean
+
+        # If UA did not emit a language element, place it immediately before
+        # the audio codec. This keeps Luminarr's tracker-facing order stable.
+        audio = str(meta.audio or "").strip()
+        if audio and audio in clean:
+            return clean.replace(audio, f"{label} {audio}", 1)
+        return clean
+
     async def get_name(self, meta: Meta) -> dict[str, str]:
-        name = meta.name
+        name = " ".join(str(meta.name or "").split())
         dub_label = self._luminarr_dub_label(meta)
-
-        if dub_label and "Dual-Audio" in name:
-            name = name.replace("Dual-Audio", dub_label, 1)
+        adjusted = self._insert_dub_label(name, meta, dub_label)
+        if adjusted != name:
             logger.info(f"{self.tracker}: adjusted multi-audio naming to '{dub_label}'")
-
-        return {"name": name}
+        return {"name": adjusted}
 
     async def get_additional_data(self, meta: Meta) -> dict[str, Any]:
         return {
@@ -110,6 +160,14 @@ class Luminarr(UNIT3D):
         }
 
     async def get_additional_checks(self, meta: Meta) -> bool:
+        if meta.is_disc not in ["BDMV", "DVD"]:
+            tracks = self._audio_languages(meta)
+            if len(tracks) > 1 and not self._language_code(meta.original_language):
+                logger.info(
+                    f"{self.tracker}: [bold red]cannot safely determine tracker-specific multi-audio naming without the original language. Skipping upload.[/bold red]"
+                )
+                return False
+
         if meta.is_disc not in ["BDMV", "DVD"] and not await self.common.check_language_requirements(
             meta, self.tracker, languages_to_check=["english"], check_audio=True, check_subtitle=True, original_language=True
         ):
