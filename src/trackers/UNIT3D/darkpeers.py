@@ -30,6 +30,25 @@ class DarkPeers(_DarkPeersBase):
         text = str(value or "").strip()
         return os.path.normpath(text).casefold() if text else ""
 
+    @staticmethod
+    def _source_title_matches_group(source_title: str, expected_group: str | None) -> bool:
+        """Check whether a Radarr sourceTitle carries the expected release group."""
+        group = str(expected_group or "").lstrip("-").strip().casefold()
+        if not group:
+            return True
+
+        # sourceTitle normally has no extension. Do not use os.path.splitext()
+        # here because dots are part of release names (for example
+        # ``...HDR.x265-VECTOR``) and splitext would incorrectly treat
+        # ``.x265-VECTOR`` as a file extension, removing the release group.
+        title = str(source_title or "").strip().casefold()
+        for extension in (".mkv", ".mp4", ".m2ts", ".avi", ".ts", ".mov", ".wmv"):
+            if title.endswith(extension):
+                title = title[: -len(extension)]
+                break
+
+        return title.endswith(f"-{group}") or title.startswith(f"{group}-")
+
     @classmethod
     def _history_source_title(
         cls,
@@ -37,12 +56,20 @@ class DarkPeers(_DarkPeersBase):
         current_path: str | None = None,
         *,
         allow_latest_import_fallback: bool = True,
+        expected_group: str | None = None,
     ) -> str | None:
         """Return a trustworthy Radarr import sourceTitle.
 
-        Exact imported-path matches are preferred. Falling back to the newest
-        import is permitted only for Radarr's movie-scoped history endpoint;
-        some Radarr versions ignore movieId on the generic history endpoint.
+        Exact imported-path matches are preferred. When Upload-Assistant adds a
+        newly-created torrent back to qBittorrent, Radarr can later record a
+        newer, stripped sourceTitle such as ``Waterworld.1995`` for the same
+        imported path. If a release group is known, only history entries carrying
+        that group are eligible so the stripped entry cannot shadow the original
+        release name required by DarkPeers rule 4.12.
+
+        Falling back to the newest import is permitted only for Radarr's
+        movie-scoped history endpoint; some Radarr versions ignore movieId on the
+        generic history endpoint.
         """
         raw_records: object
         if isinstance(records, Mapping):
@@ -74,10 +101,16 @@ class DarkPeers(_DarkPeersBase):
                 if imported_path and imported_path == current_norm:
                     exact_titles.append(source_title)
 
+        def eligible(titles: list[str]) -> str | None:
+            for title in titles:
+                if cls._source_title_matches_group(title, expected_group):
+                    return title
+            return None
+
         if exact_titles:
-            return exact_titles[0]
+            return eligible(exact_titles)
         if allow_latest_import_fallback and import_titles:
-            return import_titles[0]
+            return eligible(import_titles)
         return None
 
     def _radarr_enabled(self, meta: Meta) -> bool:
@@ -104,7 +137,8 @@ class DarkPeers(_DarkPeersBase):
         if tmdb_id <= 0:
             return ""
 
-        cache_key = str(tmdb_id)
+        expected_group = str(meta.tag or "").lstrip("-").strip()
+        cache_key = f"{tmdb_id}:{expected_group.casefold()}"
         cached = self._original_movie_name_cache.get(cache_key)
         if cached:
             return cached
@@ -169,6 +203,7 @@ class DarkPeers(_DarkPeersBase):
                         history,
                         current_path,
                         allow_latest_import_fallback=allow_latest,
+                        expected_group=expected_group or None,
                     )
                     if source_title:
                         self._original_movie_name_cache[cache_key] = source_title

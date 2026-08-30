@@ -9,6 +9,7 @@ from src.trackers.UNIT3D.darkpeers import DarkPeers
 
 ORIGINAL = "Waterworld.1995.German.DTSX.DL.2160p.UHD.UK.BluRay.DV.HDR.x265-VECTOR"
 GENERATED = "Waterworld 1995 2160p UHD BluRay Dual-Audio DTS:X 7.1 DV HDR x265-VECTOR"
+CURRENT_PATH = "/data/media/movies/Waterworld (1995) [tmdb-9804]/Waterworld.1995.mkv"
 
 
 def _adapter() -> DarkPeers:
@@ -68,17 +69,62 @@ def test_darkpeers_history_prefers_exact_current_import_path() -> None:
         {
             "eventType": "downloadFolderImported",
             "sourceTitle": ORIGINAL,
-            "data": {"importedPath": "/data/media/movies/Waterworld (1995) [tmdb-9804]/Waterworld.1995.mkv"},
+            "data": {"importedPath": CURRENT_PATH},
         },
     ]
 
     assert (
         DarkPeers._history_source_title(
             history,
-            "/data/media/movies/Waterworld (1995) [tmdb-9804]/Waterworld.1995.mkv",
+            CURRENT_PATH,
             allow_latest_import_fallback=False,
         )
         == ORIGINAL
+    )
+
+
+def test_darkpeers_history_ignores_newer_stripped_exact_import_when_group_is_known() -> None:
+    history = [
+        {
+            "eventType": "downloadFolderImported",
+            "sourceTitle": "Waterworld.1995",
+            "data": {"importedPath": CURRENT_PATH},
+        },
+        {
+            "eventType": "downloadFolderImported",
+            "sourceTitle": ORIGINAL,
+            "data": {"importedPath": CURRENT_PATH},
+        },
+    ]
+
+    assert (
+        DarkPeers._history_source_title(
+            history,
+            CURRENT_PATH,
+            allow_latest_import_fallback=False,
+            expected_group="VECTOR",
+        )
+        == ORIGINAL
+    )
+
+
+def test_darkpeers_history_rejects_stripped_name_when_expected_group_is_missing() -> None:
+    history = [
+        {
+            "eventType": "downloadFolderImported",
+            "sourceTitle": "Waterworld.1995",
+            "data": {"importedPath": CURRENT_PATH},
+        }
+    ]
+
+    assert (
+        DarkPeers._history_source_title(
+            history,
+            CURRENT_PATH,
+            allow_latest_import_fallback=False,
+            expected_group="VECTOR",
+        )
+        is None
     )
 
 
@@ -96,7 +142,7 @@ def test_darkpeers_generic_history_never_uses_unrelated_latest_import() -> None:
     assert (
         DarkPeers._history_source_title(
             history,
-            "/data/media/movies/Waterworld (1995) [tmdb-9804]/Waterworld.1995.mkv",
+            CURRENT_PATH,
             allow_latest_import_fallback=False,
         )
         is None
@@ -115,8 +161,9 @@ def test_darkpeers_movie_scoped_history_can_follow_a_radarr_rename() -> None:
     assert (
         DarkPeers._history_source_title(
             history,
-            "/data/media/movies/Waterworld (1995) [tmdb-9804]/Waterworld.1995.mkv",
+            CURRENT_PATH,
             allow_latest_import_fallback=True,
+            expected_group="VECTOR",
         )
         == ORIGINAL
     )
