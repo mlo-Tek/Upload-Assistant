@@ -1,13 +1,15 @@
 # Upload Assistant © 2025 Audionut & wastaken7 — Licensed under UAPL v1.0
 """DarkPeers safety overrides for original-release-name enforcement.
 
-DarkPeers rule 4.12 forbids re-tags. The main adapter historically generated a
-new Movie/TV name when a release was not detected as scene. For Radarr-backed
-movies that have since been renamed, recover the original imported sourceTitle
-and submit it byte-for-byte instead of rebuilding the release name.
+DarkPeers rule 4.12 forbids re-tags. For Radarr-backed movies that have since
+been renamed, recover the original imported sourceTitle so the original release
+group can be retained. The tracker-facing title itself is rebuilt from Upload
+Assistant metadata because DarkPeers requires its own naming-guide format rather
+than Scene dot naming.
 """
 
 import os
+import re
 from collections.abc import Mapping
 from typing import Any, cast
 
@@ -19,7 +21,7 @@ from src.trackers.UNIT3D.darkpeers_base import DarkPeers as _DarkPeersBase
 
 
 class DarkPeers(_DarkPeersBase):
-    """DarkPeers adapter with fail-safe original naming for Radarr movies."""
+    """DarkPeers adapter with fail-safe provenance and tracker naming."""
 
     def __init__(self, config: dict[str, Any]):
         super().__init__(config)
@@ -48,6 +50,115 @@ class DarkPeers(_DarkPeersBase):
                 break
 
         return title.endswith(f"-{group}") or title.startswith(f"{group}-")
+
+    @staticmethod
+    def _release_group(source_title: str) -> str:
+        """Extract a conservative final release-group token from a sourceTitle."""
+        title = str(source_title or "").strip()
+        for extension in (".mkv", ".mp4", ".m2ts", ".avi", ".ts", ".mov", ".wmv"):
+            if title.casefold().endswith(extension):
+                title = title[: -len(extension)]
+                break
+        match = re.search(r"-([A-Za-z0-9][A-Za-z0-9._-]{0,63})$", title)
+        return match.group(1) if match else ""
+
+    @staticmethod
+    def _replace_release_group(name: str, group: str) -> str:
+        """Ensure a generated DarkPeers name keeps the recovered original group."""
+        clean = " ".join(str(name or "").split())
+        group = str(group or "").lstrip("-").strip()
+        if not clean or not group:
+            return clean
+        if re.search(r"-[A-Za-z0-9][A-Za-z0-9._-]{0,63}$", clean):
+            return re.sub(r"-[A-Za-z0-9][A-Za-z0-9._-]{0,63}$", f"-{group}", clean)
+        return f"{clean}-{group}"
+
+    @classmethod
+    def _darkpeers_audio_tag(cls, meta: Meta) -> str:
+        """Return the DUB element from the DarkPeers naming decision matrix."""
+        if meta.is_disc:
+            return "SKIPPED"
+
+        audio = cls._languages(meta.audio_languages)
+        original = cls._normalise_language(meta.original_language)
+        if not audio or (len(audio) == 1 and original in audio):
+            return "SKIPPED"
+
+        # English originals use Language MULTi for English + exactly one other
+        # language, and MULTi for English + two or more additional languages.
+        if original == "english":
+            if "english" in audio:
+                other = audio - {"english"}
+                if len(other) == 1:
+                    return f"{next(iter(other)).title()} MULTi"
+                if len(other) >= 2:
+                    return "MULTi"
+            if len(audio) == 1:
+                return f"{next(iter(audio)).title()} Dubbed"
+            return "MULTi" if len(audio) >= 3 else "SKIPPED"
+
+        # Non-English originals: English-only is Dubbed; original + English is
+        # Dual-Audio; three or more included languages are MULTi.
+        if audio == {"english"} and original:
+            return "Dubbed"
+        if original and original in audio:
+            if "english" in audio and len(audio) == 2:
+                return "Dual-Audio"
+            if len(audio) >= 3:
+                return "MULTi"
+            other = audio - {original}
+            if len(other) == 1:
+                return f"{next(iter(other)).title()} MULTi"
+            return "SKIPPED"
+
+        # English plus exactly one other language remains Language MULTi even
+        # when the original language itself is absent.
+        if "english" in audio:
+            other = audio - {"english"}
+            if len(other) == 1:
+                return f"{next(iter(other)).title()} MULTi"
+            return "MULTi"
+
+        # Nordic-only dubbing is explicitly represented as Language Dubbed.
+        if len(audio) == 1:
+            only = next(iter(audio))
+            if original and only != original and only in cls._NORDIC_LANGUAGES:
+                return f"{only.title()} Dubbed"
+            return "SKIPPED"
+
+        # Otherwise avoid inventing a label for an ambiguous combination.
+        return "SKIPPED"
+
+    @classmethod
+    def _apply_audio_tag(cls, name: str, meta: Meta, audio_tag: str) -> str:
+        """Replace UA's generic dub token with the DarkPeers DUB element."""
+        clean = " ".join(str(name or "").split())
+        if not clean or not audio_tag or audio_tag == "SKIPPED":
+            return clean
+
+        # UA commonly emits Dual-Audio for two-language releases. Replace the
+        # generic token rather than appending a duplicate DUB element.
+        token_pattern = r"\b(?:Dual-Audio|Dubbed|MULTi|[A-Za-z]+ MULTi|[A-Za-z]+ Dubbed)\b"
+        if re.search(token_pattern, clean):
+            return re.sub(token_pattern, audio_tag, clean, count=1)
+
+        # If no generic token is present, insert the DUB element before the
+        # audio codec where possible. This keeps DP's SOURCE/TYPE -> DUB ->
+        # ACodec/Channels order without rebuilding the entire title.
+        audio_text = str(meta.audio or "").strip()
+        if audio_text and audio_text in clean:
+            return clean.replace(audio_text, f"{audio_tag} {audio_text}", 1)
+        return clean
+
+    @classmethod
+    def _normalize_dp_name(cls, name: str, meta: Meta, audio_tag: str) -> str:
+        """Apply tracker-specific spelling and ordering cleanups."""
+        clean = " ".join(str(name or "").replace(".", " ").split()) if "." in str(name or "") and " " not in str(name or "") else " ".join(str(name or "").split())
+        clean = re.sub(r"\bDTSX\b", "DTS:X", clean, flags=re.IGNORECASE)
+        clean = re.sub(r"\bDL\b", "", clean)
+        clean = re.sub(r"\s+", " ", clean).strip()
+        clean = cls._apply_audio_tag(clean, meta, audio_tag)
+        return " ".join(clean.split())
 
     @classmethod
     def _history_source_title(
@@ -207,15 +318,23 @@ class DarkPeers(_DarkPeersBase):
                     )
                     if source_title:
                         self._original_movie_name_cache[cache_key] = source_title
-                        logger.info(f"{self.tracker}: using original Radarr release name '{source_title}'")
+                        logger.info(f"{self.tracker}: using original Radarr release name '{source_title}' for provenance")
                         return source_title
 
         return ""
 
+    async def get_audio(self, meta: Meta) -> str:
+        if not meta.language_checked:
+            from src.languages import languages_manager
+
+            await languages_manager.process_desc_language(meta, tracker=self.tracker)
+        return self._darkpeers_audio_tag(meta)
+
     async def get_additional_checks(self, meta: Meta) -> bool:
         # Rule 4.12 is explicitly bannable. If Radarr integration is enabled for
-        # a non-scene movie, never fall back to a generated re-tag when import
-        # provenance cannot be recovered.
+        # a non-scene movie, never proceed when import provenance cannot be
+        # recovered. The sourceTitle is used to preserve the original group, not
+        # as the tracker-facing title, because DP requires its naming-guide format.
         if str(meta.category or "").upper() == "MOVIE" and not str(meta.scene_name or "").strip() and self._radarr_enabled(meta):
             if not await self._resolve_original_movie_name(meta):
                 logger.info(
@@ -225,10 +344,28 @@ class DarkPeers(_DarkPeersBase):
         return await super().get_additional_checks(meta)
 
     async def get_name(self, meta: Meta) -> dict[str, str]:
+        original_name = ""
         if str(meta.category or "").upper() == "MOVIE":
             original_name = await self._resolve_original_movie_name(meta)
-            if original_name:
-                # Do not apply Dual-Audio/MULTi substitutions or any other
-                # tracker naming cleanup: DarkPeers requires the exact original.
-                return {"name": original_name}
-        return await super().get_name(meta)
+
+        # Always prefer UA's metadata-built name for DP. Scene/Radarr source
+        # titles often use dot naming and non-DP tokens such as DL/DTSX/region.
+        # Temporarily hide scene_name so the base adapter cannot select it.
+        scene_name = meta.scene_name
+        try:
+            meta.scene_name = ""
+            result = await super().get_name(meta)
+        finally:
+            meta.scene_name = scene_name
+
+        name = str(result.get("name") or meta.name or "")
+        audio_tag = await self.get_audio(meta)
+        name = self._normalize_dp_name(name, meta, audio_tag)
+
+        # Rule 4.12: keep the recovered original release group even when the
+        # tracker-facing title is reformatted to comply with DP's naming guide.
+        group = self._release_group(original_name)
+        if group:
+            name = self._replace_release_group(name, group)
+
+        return {"name": name}
