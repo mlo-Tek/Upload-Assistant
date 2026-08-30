@@ -36,7 +36,17 @@ class DarkPeers(_DarkPeersBase):
         group = str(expected_group or "").lstrip("-").strip().casefold()
         if not group:
             return True
-        title = os.path.splitext(str(source_title or "").strip())[0].casefold()
+
+        # sourceTitle normally has no extension. Do not use os.path.splitext()
+        # here because dots are part of release names (for example
+        # ``...HDR.x265-VECTOR``) and splitext would incorrectly treat
+        # ``.x265-VECTOR`` as a file extension, removing the release group.
+        title = str(source_title or "").strip().casefold()
+        for extension in (".mkv", ".mp4", ".m2ts", ".avi", ".ts", ".mov", ".wmv"):
+            if title.endswith(extension):
+                title = title[: -len(extension)]
+                break
+
         return title.endswith(f"-{group}") or title.startswith(f"{group}-")
 
     @classmethod
