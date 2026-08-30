@@ -155,7 +155,6 @@ class DarkPeers(_DarkPeersBase):
         """Apply tracker-specific spelling and ordering cleanups."""
         clean = " ".join(str(name or "").replace(".", " ").split()) if "." in str(name or "") and " " not in str(name or "") else " ".join(str(name or "").split())
         clean = re.sub(r"\bDTSX\b", "DTS:X", clean, flags=re.IGNORECASE)
-        clean = re.sub(r"\bDL\b", "", clean)
         clean = re.sub(r"\s+", " ", clean).strip()
         clean = cls._apply_audio_tag(clean, meta, audio_tag)
         return " ".join(clean.split())
