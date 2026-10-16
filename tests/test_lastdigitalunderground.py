@@ -75,6 +75,12 @@ async def test_holiday_ranks_before_musical():
 
 
 @pytest.mark.asyncio
+async def test_musical_keyword_of_stage_adaptation_is_not_a_musical():
+    meta = make_meta(combined_genres="Comedy, Drama", keywords=["based on play or musical"])
+    assert (await make_tracker().get_category_id(meta))["category_id"] == "1"
+
+
+@pytest.mark.asyncio
 async def test_non_english_film_without_subs_goes_to_nosub_nodub():
     meta = make_meta(original_language="de", audio_languages=["German"], subtitle_languages=["German"])
     assert (await make_tracker().get_category_id(meta))["category_id"] == "22"
