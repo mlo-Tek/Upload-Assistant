@@ -11,6 +11,7 @@ from src.console import logger
 from src.get_desc import DescriptionBuilder
 from src.meta import Meta
 from src.rehostimages import ImageHostPolicy, RehostImagesManager
+from src.tracker_images import get_tracker_image_collection
 from src.trackers.common import Common
 
 Config = dict[str, Any]
@@ -225,7 +226,8 @@ class DigitalCore:
         elif meta.category in ("MOVIE", "TV"):
             # Use the first uploaded screenshot as the preview image.
             # DigitalCore can't render WEBP, so only accept formats it supports.
-            images = meta.image_list
+            # Prefer the tracker-specific (rehosted) screenshots over the release-wide ones.
+            images = get_tracker_image_collection(meta, self.tracker, "screenshots")
             if isinstance(images, list):
                 for image in images:
                     raw_url = image.get("raw_url") if isinstance(image, dict) else None
