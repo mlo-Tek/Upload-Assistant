@@ -99,6 +99,21 @@ PASSTHEPOPCORN_POLICY = TorrentPolicy(max_piece_size=16 * MIB)
 ANTHELION_POLICY = TorrentPolicy(max_metainfo_size=250 * KIB, required_piece_size=128 * MIB)
 
 
+def ldu_piece_size(total_size: int) -> int:
+    """LDU block-size table (rule 10). Smaller than 1 MiB is not creatable by the provisioning path, so 1 MiB is the floor."""
+    for limit, piece_size in ((2 * GIB, MIB), (4 * GIB, 2 * MIB), (8 * GIB, 4 * MIB), (16 * GIB, 8 * MIB)):
+        if total_size < limit:
+            return piece_size
+    return 16 * MIB
+
+
+def _ldu_validator(stats: TorrentStats) -> bool:
+    return stats.piece_size == ldu_piece_size(stats.content_size)
+
+
+LDU_POLICY = TorrentPolicy(validator=_ldu_validator, piece_size_selector=ldu_piece_size)
+
+
 def generic_reuse_allowed(stats: TorrentStats, meta: Meta) -> bool:
     """Preserve the historical client-reuse thresholds in one responsible layer."""
     max_piece_size = meta.max_piece_size
