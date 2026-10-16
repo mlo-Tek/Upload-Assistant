@@ -88,3 +88,15 @@ def test_firstpic_is_empty_without_usable_screenshots(tmp_path):
 
     assert asyncio.run(tracker.get_firstpic(no_images)) == ""  # noqa: S101
     assert asyncio.run(tracker.get_firstpic(only_webp)) == ""  # noqa: S101
+
+
+def test_firstpic_prefers_tracker_rehosted_screenshots(tmp_path):
+    import asyncio
+
+    from src.tracker_images import set_tracker_image_collection
+
+    tracker = _tracker()
+    meta = _meta(tmp_path, category="TV", image_list=[{"raw_url": "https://img.ptscreens.com/a.png"}])
+    set_tracker_image_collection(meta, "DIGITALCORE", "screenshots", [{"raw_url": "https://img.digitalcore.club/i/abc.png"}])
+
+    assert asyncio.run(tracker.get_firstpic(meta)) == "https://img.digitalcore.club/i/abc.png"  # noqa: S101
