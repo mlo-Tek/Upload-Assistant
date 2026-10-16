@@ -59,3 +59,41 @@ async def test_download_tracker_torrent_returns_the_path_only_on_success(tmp_pat
     _patch_client(monkeypatch, fail=False)
     assert await common.download_tracker_torrent(meta, "TESTTRK", downurl="https://example.invalid/dl")
     assert torrent_path.read_bytes() == b"torrent-data"
+
+
+@pytest.mark.asyncio
+async def test_nfo_is_not_repeated_in_the_stored_description(tmp_path):
+    (tmp_path / "tmp" / "release").mkdir(parents=True)
+    nfo = "RELEASE NFO LINE"
+    meta = Meta(
+        base_dir=str(tmp_path),
+        uuid="release",
+        category="MOVIE",
+        filelist=["Fictional.Movie.mkv"],
+        description=f"[code]{nfo}[/code]",
+        description_nfo_content=nfo,
+        ua_signature="Shared with Upload-Assistant",
+    )
+
+    result = await DescriptionBuilder("DIGITALCORE", {"DEFAULT": {}, "TRACKERS": {"DIGITALCORE": {}}}).general_description_generator(
+        meta,
+        audio_spectrogram=False,
+        bluray=False,
+        book=False,
+        custom_header=False,
+        custom_signature=False,
+        dynamic_hdr_plot=False,
+        game=False,
+        languages=False,
+        logo=False,
+        mediainfo=False,
+        menu_screenshots=False,
+        music=False,
+        screenshots=False,
+        tonemapped_header=False,
+        tv_info=False,
+        user_description=False,
+    )
+
+    assert result.count(nfo) == 1
+    assert f"[nfo]{nfo}[/nfo]" in result
