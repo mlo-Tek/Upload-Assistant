@@ -138,6 +138,17 @@ class VideoManager:
             except Exception:
                 entries = []
 
+            # Packs with one sub-folder per episode have no video files at the top level.
+            # Only in that case, look one level deeper (never into sample/proof folders).
+            if not any(Path(e).suffix.lower() in VIDEO_EXTENSIONS for e in entries):
+                try:
+                    for sub in sorted(p for p in Path(videoloc).iterdir() if p.is_dir()):
+                        if sub.name.lower() in ("sample", "samples", "proof", "proofs"):
+                            continue
+                        entries.extend(f"{sub.name}/{p.name}" for p in sub.iterdir() if p.is_file())
+                except Exception:
+                    pass
+
             for file in entries:
                 fname_lower = file.lower()
                 ext = Path(file).suffix.lower()

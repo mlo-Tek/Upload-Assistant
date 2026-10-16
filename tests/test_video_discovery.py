@@ -75,3 +75,42 @@ def test_empty_directory_stops_before_scene_or_mediainfo_processing(tmp_path, mo
 
     scene.assert_not_awaited()
     export.assert_not_awaited()
+
+
+def test_season_pack_with_one_folder_per_episode_is_discovered(tmp_path):
+    release = tmp_path / "Show.S01.GERMAN.DL.2160p.WEB.h265-GRP"
+    release.mkdir()
+    episodes = []
+    for episode in range(1, 4):
+        folder = release / f"Show.S01E{episode:02}.GERMAN.DL.2160p.WEB.h265-GRP"
+        folder.mkdir()
+        video = folder / f"show.s01e{episode:02}.mkv"
+        video.write_bytes(b"video")
+        (folder / "release.nfo").write_text("nfo")
+        episodes.append(str(video.resolve()))
+    sample = release / "Sample"
+    sample.mkdir()
+    (sample / "sample.mkv").write_bytes(b"sample")
+    proof = release / "Proof"
+    proof.mkdir()
+    (proof / "proof.mkv").write_bytes(b"proof")
+
+    video, filelist = asyncio.run(VideoManager().get_video(str(release)))
+
+    assert filelist == episodes
+    assert video == episodes[0]
+
+
+def test_nested_discovery_is_only_a_fallback_when_top_level_has_videos(tmp_path):
+    release = tmp_path / "Show.S01.1080p.WEB-GRP"
+    release.mkdir()
+    top = release / "show.s01e01.mkv"
+    top.write_bytes(b"video")
+    extras = release / "Extras"
+    extras.mkdir()
+    (extras / "featurette.mkv").write_bytes(b"extra")
+
+    video, filelist = asyncio.run(VideoManager().get_video(str(release)))
+
+    assert filelist == [str(top.resolve())]
+    assert video == str(top.resolve())
