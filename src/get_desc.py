@@ -1663,6 +1663,10 @@ class DescriptionBuilder:
             scene_nfo_block = f"[center][spoiler=Scene NFO:][code]{meta.description_nfo_content}[/code][/spoiler][/center]"
             meta_description = meta_description.replace(scene_nfo_block, "").strip()
 
+        if nfo and meta.description_nfo_content:
+            # The NFO gets its own block further down, so drop the copy kept in the stored description.
+            meta_description = meta_description.replace(f"[code]{meta.description_nfo_content}[/code]", "").strip()
+
         # Description that may come from API requests
         if description:
             # Add FraMeSToR NFO to AITHER
