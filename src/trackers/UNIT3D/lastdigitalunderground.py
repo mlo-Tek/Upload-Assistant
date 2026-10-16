@@ -80,7 +80,8 @@ class LastDigitalUnderground(UNIT3D):
                 category_id = "18"
             elif any(x in genres.lower() for x in ["holiday", "easter", "christmas", "halloween", "thanksgiving"]):
                 category_id = "24"
-            elif "musical" in genres.lower():
+            elif "musical" in str(meta.combined_genres).lower():
+                # Genres only: keywords such as "based on play or musical" are not musicals.
                 category_id = "25"
             elif "documentary" in genres.lower():
                 category_id = "17"
