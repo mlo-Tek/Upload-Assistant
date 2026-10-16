@@ -23,3 +23,68 @@ def test_force_rehost_images_uses_digitalcore_sharex_without_changing_global_hos
     assert tracker.image_host_policy.approved_image_hosts == ("sharex",)  # noqa: S101
     assert tracker.rehost_images_manager.default_config["img_host_1"] == "sharex"  # noqa: S101
     assert config["DEFAULT"]["img_host_1"] == "ptscreens"  # noqa: S101
+
+
+def _tracker():
+    config = {
+        "DEFAULT": {},
+        "TRACKERS": {"DIGITALCORE": {"api_key": "tracker-key", "anon": False}},
+    }
+    return DigitalCore(config)
+
+
+def _meta(tmp_path, **attrs):
+    from src.meta import Meta
+
+    meta = Meta(path=str(tmp_path))
+    for key, value in attrs.items():
+        setattr(meta, key, value)
+    return meta
+
+
+def test_p2p_flag_is_off_for_scene_and_on_for_p2p_releases(tmp_path, monkeypatch):
+    import asyncio
+
+    tracker = _tracker()
+
+    async def no_mediainfo(_meta):
+        return ""
+
+    async def no_description(_meta):
+        return ""
+
+    monkeypatch.setattr(tracker, "mediainfo", no_mediainfo)
+    monkeypatch.setattr(tracker, "generate_description", no_description)
+
+    scene = _meta(tmp_path, category="MOVIE", resolution="1080p", scene_name="Movie.2020.1080p.BluRay.x264-GRP")
+    p2p = _meta(tmp_path, category="MOVIE", resolution="1080p", scene_name="")
+
+    assert asyncio.run(tracker.fetch_data(scene))["p2p"] == "0"  # noqa: S101
+    assert asyncio.run(tracker.fetch_data(p2p))["p2p"] == "1"  # noqa: S101
+
+
+def test_firstpic_uses_first_supported_screenshot_for_movies_and_tv(tmp_path):
+    import asyncio
+
+    tracker = _tracker()
+    images = [
+        {"raw_url": "https://img.digitalcore.club/i/first.webp"},
+        {"raw_url": "https://img.digitalcore.club/i/second.PNG?x=1"},
+        {"raw_url": "https://img.digitalcore.club/i/third.jpg"},
+    ]
+
+    for category in ("MOVIE", "TV"):
+        meta = _meta(tmp_path, category=category, image_list=images)
+        assert asyncio.run(tracker.get_firstpic(meta)) == "https://img.digitalcore.club/i/second.PNG?x=1"  # noqa: S101
+
+
+def test_firstpic_is_empty_without_usable_screenshots(tmp_path):
+    import asyncio
+
+    tracker = _tracker()
+
+    no_images = _meta(tmp_path, category="MOVIE", image_list=[])
+    only_webp = _meta(tmp_path, category="MOVIE", image_list=[{"raw_url": "https://x/y.webp"}])
+
+    assert asyncio.run(tracker.get_firstpic(no_images)) == ""  # noqa: S101
+    assert asyncio.run(tracker.get_firstpic(only_webp)) == ""  # noqa: S101

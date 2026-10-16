@@ -222,6 +222,15 @@ class DigitalCore:
                 raw_url = covers[0].get("raw_url")
                 if raw_url:
                     return str(raw_url)
+        elif meta.category in ("MOVIE", "TV"):
+            # Use the first uploaded screenshot as the preview image.
+            # DigitalCore can't render WEBP, so only accept formats it supports.
+            images = meta.image_list
+            if isinstance(images, list):
+                for image in images:
+                    raw_url = image.get("raw_url") if isinstance(image, dict) else None
+                    if raw_url and str(raw_url).split("?", 1)[0].lower().endswith((".jpg", ".jpeg", ".png", ".gif")):
+                        return str(raw_url)
         return ""
 
     async def fetch_data(self, meta: Meta) -> dict[str, Any]:
@@ -237,7 +246,8 @@ class DigitalCore:
             "language": meta.book_language,
             "mediainfo": await self.mediainfo(meta),
             "nfo": await self.generate_description(meta),
-            "p2p": "0",
+            # Scene releases are not P2P; everything else is.
+            "p2p": "0" if meta.scene_name else "1",
             "reqid": "0",
             "section": "new",
             "unrar": "1",
