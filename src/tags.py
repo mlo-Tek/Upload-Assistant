@@ -20,6 +20,25 @@ def guessit_fn(value: str, options: dict[str, Any] | None = None) -> dict[str, A
     return cast(dict[str, Any], guessit_module.guessit(value, options))
 
 
+_FOLDER_TAG_PATTERN = re.compile(r"-?[A-Za-z0-9_]{2,20}")
+
+
+async def prefer_folder_tag(video: str, meta: Meta, file_tag: str | None) -> str | None:
+    """Use the release folder's group tag in place of the one derived from the file name.
+
+    Scene-style releases often ship a lowercase file such as "vector-title.2160p.dv.mkv" inside a
+    properly named release folder. The file name then yields a bogus tag ("-title.2160p.dv") or none.
+    The folder name is authoritative, so it wins when it carries a plain group tag.
+    """
+    if not meta.isdir or meta.is_disc or meta.anime or meta.tv_pack or not meta.path or Path(video).is_dir():
+        return file_tag
+
+    folder_tag = await get_tag(str(meta.path), meta)
+    if folder_tag and _FOLDER_TAG_PATTERN.fullmatch(folder_tag) and any(char.isalpha() for char in folder_tag):
+        return folder_tag
+    return file_tag
+
+
 async def get_tag(video: str, meta: Meta, season_pack_check: bool = False) -> str:
     # Using regex from cross-seed (https://github.com/cross-seed/cross-seed/tree/master?tab=Apache-2.0-1-ov-file)
     release_group = None

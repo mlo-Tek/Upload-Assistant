@@ -31,7 +31,7 @@ from src.media_extensions import VIDEO_EXTENSIONS
 from src.meta import Meta
 from src.region import get_distributor, get_mediainfo_service, get_region, get_service
 from src.sports import detect_sports
-from src.tags import get_tag, tag_override
+from src.tags import get_tag, prefer_folder_tag, tag_override
 from src.tvmaze import tvmaze_manager
 from src.video import video_manager
 from src.xxx_keywords import extract_xxx_keywords
@@ -1773,7 +1773,7 @@ async def finalize_metadata(
         if meta.we_need_tag:
             meta.tag = await get_tag(meta.scene_name, meta)
         else:
-            meta.tag = await get_tag(video, meta)
+            meta.tag = await prefer_folder_tag(video, meta, await get_tag(video, meta))
             # all lowercase filenames will have bad group tag, it's probably a scene release.
             # some extracted files do not match release name so lets double check if it really is a scene release
             if not meta.scene and meta.tag:
