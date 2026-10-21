@@ -396,16 +396,16 @@ def test_album_title_containing_ost_letters_is_not_a_soundtrack():
                 relative_path=f"{index}.flac",
                 format="FLAC",
                 codec="FLAC",
-                artist="RiN",
-                album_artist="RiN",
+                artist="Vexa",
+                album_artist="Vexa",
                 album="NOSTALGIA",
                 title=f"Track {index}",
                 track_number=index,
-                tags={"albumartist": ["RiN"], "artist": ["RiN"]},
+                tags={"albumartist": ["Vexa"], "artist": ["Vexa"]},
             )
         )
 
-    MusicReleaseAnalyzer()._derive_release_fields(release, "RiN-NOSTALGIA-DE-16BIT-WEB-FLAC-2026-ENRiCH")
+    MusicReleaseAnalyzer()._derive_release_fields(release, "Vexa-NOSTALGIA-DE-16BIT-WEB-FLAC-2026-FAKEGRP")
 
     assert release.get("release_type") == "Album"
 
@@ -413,30 +413,31 @@ def test_album_title_containing_ost_letters_is_not_a_soundtrack():
 def test_orpheus_preserves_multiple_artists_and_release_namespace():
     release = MusicRelease(root=".")
     release.tracks.append(
-        AudioTrack(path="track.flac", relative_path="track.flac", format="FLAC", codec="FLAC", bit_depth=16, sample_rate=44_100, title="No Church in the Wild", track_number=1)
+        AudioTrack(path="track.flac", relative_path="track.flac", format="FLAC", codec="FLAC", bit_depth=16, sample_rate=44_100, title="Invented Anthem", track_number=1)
     )
     for field, value in {
-        "artists": ["Jay-Z", "Example Rapper"],
-        "artist": "Jay-Z & Example Rapper",
-        "album": "Watch the Throne",
+        "artists": ["Example MC", "Example Rapper"],
+        "artist": "Example MC & Example Rapper",
+        "album": "Invented Crown",
         "year": "2011",
         "media": "CD",
         "release_type": "Album",
-        "release_label": "Roc-A-Fella",
-        "release_catalogue_number": "B0015962-02",
+        "release_label": "Fictional Records",
+        "release_catalogue_number": "FIC0001-02",
     }.items():
         release.set_field(field, value, MetadataSource.FILE_TAG, 1.0)
 
     adapter = Orpheus({"TRACKERS": {"ORPHEUS": {}}})
     payload = adapter.build_upload_payload(Meta(category="MUSIC", artwork_url="https://images.example/cover.jpg"), release)
 
-    assert payload["artists[]"] == ["Jay-Z", "Example Rapper"]
+    assert payload["artists[]"] == ["Example MC", "Example Rapper"]
     assert payload["importance[]"] == [1, 1]
-    assert payload["record_label"] == "Roc-A-Fella"
-    assert payload["catalogue_number"] == "B0015962-02"
-    assert "remaster_record_label" not in payload
-    assert "remaster_catalogue_number" not in payload
-    assert [entry for entry in adapter._form_data(payload) if entry[0] == "artists[]"] == [("artists[]", "Jay-Z"), ("artists[]", "Example Rapper")]
+    # Orpheus stores release information only in its edition fields.
+    assert payload["remaster_record_label"] == "Fictional Records"
+    assert payload["remaster_catalogue_number"] == "FIC0001-02"
+    assert payload["remaster_year"] == "2011"
+    assert not {"record_label", "catalogue_number", "remaster"} & set(payload)
+    assert [entry for entry in adapter._form_data(payload) if entry[0] == "artists[]"] == [("artists[]", "Example MC"), ("artists[]", "Example Rapper")]
 
 
 def test_orpheus_additional_checks_block_prohibited_music_artists():
@@ -491,7 +492,18 @@ def test_orpheus_debug_renders_payload_without_public_cover_url():
     """Debug must inspect an embedded/local cover without hosting or blocking."""
     release = MusicRelease(root=".")
     release.tracks.append(
-        AudioTrack(path="single.flac", relative_path="single.flac", format="FLAC", codec="FLAC", bit_depth=16, sample_rate=44_100, title="Single", track_number=1)
+        AudioTrack(
+            path="single.flac",
+            relative_path="single.flac",
+            format="FLAC",
+            codec="FLAC",
+            bit_depth=16,
+            sample_rate=44_100,
+            title="Single",
+            track_number=1,
+            artist="Artist",
+            album="Album",
+        )
     )
     for field, value in {"artist": "Artist", "artists": ["Artist"], "album": "Album", "year": "2024", "media": "WEB", "release_type": "Single"}.items():
         release.set_field(field, value, MetadataSource.FILE_TAG, 1.0)
@@ -528,7 +540,7 @@ def test_orpheus_uses_concrete_release_year_for_required_edition_year():
 
     payload = Orpheus({"TRACKERS": {"ORPHEUS": {}}}).build_upload_payload(Meta(category="MUSIC"), release)
 
-    assert payload["remaster"] == 0
+    assert "remaster" not in payload
     assert payload["remaster_year"] == "2026"
     assert not release.get("edition_year")
 
@@ -547,7 +559,7 @@ def test_orpheus_rejects_mixed_audio_formats_when_building_payload():
         Orpheus({"TRACKERS": {"ORPHEUS": {}}}).build_upload_payload(Meta(category="MUSIC"), release)
 
 
-def test_orpheus_marks_explicit_edition_metadata_as_remaster():
+def test_orpheus_sends_explicit_edition_year_in_edition_fields():
     release = MusicRelease(root=".")
     release.tracks.append(AudioTrack(path="track.flac", relative_path="track.flac", format="FLAC", codec="FLAC"))
     for field, value in {
@@ -563,7 +575,7 @@ def test_orpheus_marks_explicit_edition_metadata_as_remaster():
 
     payload = Orpheus({"TRACKERS": {"ORPHEUS": {}}}).build_upload_payload(Meta(category="MUSIC"), release)
 
-    assert payload["remaster"] == 1
+    assert "remaster" not in payload
     assert payload["remaster_year"] == "2024"
 
 
@@ -746,24 +758,24 @@ def test_musicbrainz_prefers_matching_cd_barcode_over_same_track_count_vinyl():
         [
             {
                 "id": "wrong-vinyl",
-                "title": "Seventh Son of a Seventh Son",
+                "title": "Invented Prophecy",
                 "score": "100",
-                "barcode": "881034121455",
+                "barcode": "123456789012",
                 "media": [{"format": '12" Vinyl', "track-count": 8}],
             },
             {
                 "id": "correct-cd",
-                "title": "Seventh Son of a Seventh Son",
+                "title": "Invented Prophecy",
                 "score": "95",
-                "barcode": "0190295567699",
+                "barcode": "1234567890128",
                 "media": [{"format": "CD", "track-count": 8}],
-                "label-info": [{"catalog-number": "0190295567699"}],
+                "label-info": [{"catalog-number": "1234567890128"}],
             },
         ],
-        "Seventh Son of a Seventh Son",
+        "Invented Prophecy",
         8,
         "CD",
-        "0190295567699",
+        "1234567890128",
     )
 
     assert result is not None
@@ -773,7 +785,7 @@ def test_musicbrainz_prefers_matching_cd_barcode_over_same_track_count_vinyl():
 def test_external_single_cannot_override_an_album_length_local_release():
     release = MusicRelease(root=".")
     release.tracks = [AudioTrack(path=f"{index}.flac", relative_path=f"{index}.flac", format="FLAC", codec="FLAC", duration=150) for index in range(18)]
-    release.set_field("artist", "RiN", MetadataSource.FILE_TAG, 1.0)
+    release.set_field("artist", "Vexa", MetadataSource.FILE_TAG, 1.0)
     release.set_field("album", "NOSTALGIA", MetadataSource.FILE_TAG, 1.0)
     release.set_field("release_type", "Album", MetadataSource.INFERRED, 0.65)
     external_single = {"id": "wrong-single", "release-group": {"primary-type": "Single"}}

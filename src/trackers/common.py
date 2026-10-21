@@ -10,6 +10,7 @@ import sys
 import unicodedata
 from collections.abc import Callable
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Any, cast
 
 import aiofiles
@@ -357,6 +358,7 @@ class Common:
     ) -> str | None:
         path = f"{meta.base_dir}{'/' + 'tmp' + '/'}{meta.uuid}/[{tracker}_cross].torrent" if cross else f"{meta.base_dir}{'/' + 'tmp' + '/'}{meta.uuid}/[{tracker}].torrent"
         if downurl:
+            temporary_path: Path | None = None
             try:
                 cookie_jar = None
                 from src.trackersetup import http_trackers
@@ -373,9 +375,14 @@ class Common:
                     session.stream("GET", downurl) as r,
                 ):
                     r.raise_for_status()
-                    async with aiofiles.open(path, "wb") as f:
+                    with NamedTemporaryFile(dir=Path(path).parent, prefix=f".{Path(path).name}.", suffix=".tmp", delete=False) as temporary_file:
+                        temporary_path = Path(temporary_file.name)
+                    async with aiofiles.open(temporary_path, "wb") as f:
                         async for chunk in r.aiter_bytes():
                             await f.write(chunk)
+
+                await asyncio.to_thread(Torrent.read, temporary_path)
+                temporary_path.replace(path)
 
                 if cross:
                     return None
@@ -388,6 +395,10 @@ class Common:
                 logger.warning(f"[yellow]Warning: Could not download torrent file: {e!s}[/yellow]")
                 logger.info("[yellow]Download manually from the tracker.[/yellow]")
                 return None
+            finally:
+                if temporary_path is not None:
+                    with contextlib.suppress(OSError):
+                        temporary_path.unlink(missing_ok=True)
 
         return None
 
@@ -792,13 +803,20 @@ class Common:
                 bbcode = BBCODE()
                 description, imagelist = bbcode.clean_unit3d_description(description, torrent_url)
                 if not skip_tracker_descriptions:
-                    logger.info(f"[green]Successfully grabbed description from {tracker}")
-                    logger.info(f"Extracted description: \n\n{description}\n\n", extra={"markup": False, "highlighter": None})
-
                     # A tracker ID only identifies the source of this metadata.  It
                     # must not suppress the interactive review of the description.
                     # Candidate collection sets ``unattended`` explicitly and is
                     # therefore still non-interactive.
+                    if not description:
+                        # Nothing useful remained after cleanup (only images,
+                        # signatures or empty BBCode), so there is nothing to review.
+                        logger.info(f"[yellow]Description from {tracker} has no text content after cleanup; ignoring it.[/yellow]")
+                        if not meta.unattended and not meta.keep_images:
+                            imagelist = []
+                        return tmdb, imdb, tvdb, mal, description, category, infohash, imagelist, file_name
+                    logger.info(f"[green]Successfully grabbed description from {tracker}")
+                    logger.info(f"Extracted description: \n\n{description}\n\n", extra={"markup": False, "highlighter": None})
+
                     if meta.unattended:
                         return tmdb, imdb, tvdb, mal, description, category, infohash, imagelist, file_name
                     logger.info("[cyan]Do you want to edit, discard or keep the description?[/cyan]")
