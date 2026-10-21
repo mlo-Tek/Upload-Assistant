@@ -596,3 +596,20 @@ async def test_lowercase_srrdb_search_records_search_and_details(tmp_path: Path,
     assert scene is True
     assert len(client.requested_urls) == 2
     assert operations == ["search", "details"]
+
+
+@pytest.mark.asyncio
+async def test_lowercase_scene_lookup_ignores_the_returned_path_without_a_match():
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from src.prep_helpers import _lowercase_scene_release_name
+
+    video = "/downloads/vector-fictional.2160p.dv.mkv"
+    meta = Meta(imdb_id=1)
+
+    def prep(result):
+        return SimpleNamespace(scene_manager=SimpleNamespace(is_scene=AsyncMock(return_value=result)))
+
+    assert await _lowercase_scene_release_name(prep((video, False, 1)), meta, video) == ""
+    assert await _lowercase_scene_release_name(prep(("Fictional.Movie.2021.2160p.BluRay.x265-GRP", True, 1)), meta, video) == "Fictional.Movie.2021.2160p.BluRay.x265-GRP"

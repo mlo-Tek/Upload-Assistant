@@ -906,6 +906,16 @@ def _should_add_bluray_link(meta: Meta, config: dict[str, Any]) -> bool:
     return False
 
 
+async def _lowercase_scene_release_name(prep_instance: Any, meta: Meta, videopath: str) -> str:
+    """Return the scene release name for an all-lowercase file name, or "" when none was found.
+
+    is_scene() hands the input path back unchanged when nothing matched, so the result is only
+    a release name if the scene flag is set.
+    """
+    release_name, scene_found, _ = await prep_instance.scene_manager.is_scene(videopath, meta, meta.imdb_id, lower=True)
+    return release_name if scene_found else ""
+
+
 def _should_fetch_bluray_info(meta: Meta, get_bluray_info: bool, add_bluray_link: bool = False) -> bool:
     return bool(
         meta.is_disc in ("BDMV", "DVD")
@@ -1773,7 +1783,7 @@ async def finalize_metadata(
                     base = match.group(1)
                     is_all_lowercase = base.islower()
                     if is_all_lowercase:
-                        release_name, _, _ = await prep_instance.scene_manager.is_scene(videopath, meta, meta.imdb_id, lower=True)
+                        release_name = await _lowercase_scene_release_name(prep_instance, meta, videopath)
                         if release_name:
                             try:
                                 meta.scene_name = release_name
