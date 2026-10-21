@@ -20,7 +20,7 @@ from src.book_prep import AUDIOBOOK_EXTENSIONS, BOOK_EXTENSIONS, BOOK_SERVICES
 from src.cleanup import cleanup_manager
 from src.clients import Clients
 from src.config_helpers import parse_bool
-from src.console import logger
+from src.console import logger, prompt_in_thread
 from src.edition import RELEASE_TOKEN_RE, get_edition
 from src.exceptions import NoAudioMediaError
 from src.exportmi import export_info, get_conformance_error, mi_resolution, validate_mediainfo
@@ -29,7 +29,7 @@ from src.imdb import imdb_manager, imdb_match_rejection
 from src.languages import languages_manager
 from src.media_extensions import VIDEO_EXTENSIONS
 from src.meta import Meta
-from src.region import get_distributor, get_region, get_service
+from src.region import get_distributor, get_mediainfo_service, get_region, get_service
 from src.sports import detect_sports
 from src.tags import get_tag, tag_override
 from src.tvmaze import tvmaze_manager
@@ -906,6 +906,16 @@ def _should_add_bluray_link(meta: Meta, config: dict[str, Any]) -> bool:
     return False
 
 
+async def _lowercase_scene_release_name(prep_instance: Any, meta: Meta, videopath: str) -> str:
+    """Return the scene release name for an all-lowercase file name, or "" when none was found.
+
+    is_scene() hands the input path back unchanged when nothing matched, so the result is only
+    a release name if the scene flag is set.
+    """
+    release_name, scene_found, _ = await prep_instance.scene_manager.is_scene(videopath, meta, meta.imdb_id, lower=True)
+    return release_name if scene_found else ""
+
+
 def _should_fetch_bluray_info(meta: Meta, get_bluray_info: bool, add_bluray_link: bool = False) -> bool:
     return bool(
         meta.is_disc in ("BDMV", "DVD")
@@ -1717,6 +1727,19 @@ async def finalize_metadata(
         if meta.scene and not meta.service and meta.category in ("TV", "MOVIE"):
             await prep_instance.parse_scene_nfo(meta)
 
+        # MediaInfo signatures are weaker evidence than explicit, filename or NFO services.
+        if not meta.service and (not meta.unattended or meta.unattended_confirm):
+            service, service_longname = await get_mediainfo_service(meta)
+            if service:
+                with contextlib.suppress(EOFError):
+                    if await prompt_in_thread(
+                        cli_ui.ask_yes_no,
+                        f"MediaInfo signature suggests {service} ({service_longname}). Set this as the service?",
+                        default=False,
+                    ):
+                        meta.service, meta.service_longname = service, service_longname
+                        logger.info(f"[green]Confirmed {service} ({service_longname}) from MediaInfo signature[/green]")
+
         # Combine genres from TMDB and IMDb
         tmdb_genres = meta.genres or []
         imdb_genres = str(meta.imdb_info.get("genres") or "")
@@ -1760,7 +1783,7 @@ async def finalize_metadata(
                     base = match.group(1)
                     is_all_lowercase = base.islower()
                     if is_all_lowercase:
-                        release_name, _, _ = await prep_instance.scene_manager.is_scene(videopath, meta, meta.imdb_id, lower=True)
+                        release_name = await _lowercase_scene_release_name(prep_instance, meta, videopath)
                         if release_name:
                             try:
                                 meta.scene_name = release_name
